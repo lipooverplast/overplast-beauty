@@ -1,0 +1,7 @@
+{
+  "name": "Overplast Beauty Cloud Base Management System",
+  "description": "Professional business management and invoicing for Overplast Beauty, featuring AI-powered inventory and luxury branding.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

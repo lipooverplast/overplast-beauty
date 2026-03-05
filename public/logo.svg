@@ -1,0 +1,16 @@
+<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Golden Silhouette (More detailed) -->
+  <g fill="#FFD700">
+    <path d="M250 80 c-10 0 -15 10 -15 20 s5 20 15 20 s15 -10 15 -20 s-5 -20 -15 -20z"/>
+    <path d="M250 130 c-20 0 -40 40 -30 100 c10 60 30 80 30 150 c0 50 -10 80 -10 100 h20 c0 -20 10 -50 10 -100 c0 -70 -20 -90 -30 -150 c-10 -60 10 -100 30 -100z"/>
+    <path d="M220 150 c-30 20 -50 60 -40 100 c5 20 15 30 30 40 c-10 -20 -15 -40 -10 -60 c5 -30 20 -60 40 -80z"/>
+  </g>
+  
+  <!-- Crescent Shapes -->
+  <path d="M160 180 c-40 50 -40 150 0 200" stroke="#FFD700" stroke-width="6" fill="none" opacity="0.8"/>
+  <path d="M340 180 c40 50 40 150 0 200" stroke="#FFD700" stroke-width="6" fill="none" opacity="0.8"/>
+  
+  <!-- White Text (As per user image) -->
+  <text x="250" y="440" font-family="Arial, sans-serif" font-size="55" fill="white" text-anchor="middle" font-weight="900" style="letter-spacing: 2px;">OVERPLAST</text>
+  <text x="250" y="485" font-family="Georgia, serif" font-size="35" fill="white" text-anchor="middle" font-style="italic">Beauty</text>
+</svg>

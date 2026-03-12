@@ -23,10 +23,13 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
   const [selectedCategory, setSelectedCategory] = useState('All Categories');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [restockQty, setRestockQty] = useState(0);
+  const [returnQty, setReturnQty] = useState(0);
+  const [returnNote, setReturnNote] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   
   // Custom Delete Confirmation State
@@ -54,6 +57,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
         if (tx.date.startsWith(historyMonth)) {
           if (tx.type === 'IN') acc.in += tx.quantity;
           if (tx.type === 'OUT') acc.out += tx.quantity;
+          if (tx.type === 'RETURN') acc.out += tx.quantity; // Returns now decrease stock (outgoing return)
         }
         return acc;
       }, { in: 0, out: 0 });
@@ -131,6 +135,38 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
     }
   };
 
+  const handleReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct || returnQty <= 0) return;
+    setIsSaving(true);
+
+    try {
+      const updatedProduct = { ...editingProduct, stock: editingProduct.stock - returnQty };
+      const transaction: StockTransaction = {
+        id: `tx-ret-${Date.now()}`,
+        productId: editingProduct.id,
+        productName: editingProduct.name,
+        type: 'RETURN',
+        quantity: returnQty,
+        date: new Date().toISOString().split('T')[0],
+        note: returnNote || 'Stock Return'
+      };
+
+      await db.saveProducts([updatedProduct]);
+      await db.saveStockTransactions([transaction]);
+      
+      onUpdate();
+      setIsReturnModalOpen(false);
+      setEditingProduct(null);
+      setReturnQty(0);
+      setReturnNote('');
+    } catch (err: any) {
+      alert("Return failed: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const triggerDeleteConfirm = (e: React.MouseEvent, product: Product) => {
     e.preventDefault();
     e.stopPropagation();
@@ -167,6 +203,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
     const formData = new FormData(e.currentTarget);
     const mrp = Number(formData.get('mrp')) || 0;
     const tp = Number(formData.get('tp')) || 0;
+    const purchasePrice = Number(formData.get('purchasePrice')) || 0;
     const stock = parseInt(formData.get('stock') as string) || 0;
     const isNewProduct = !editingProduct;
     
@@ -175,7 +212,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
       name: formData.get('name') as string,
       sku: formData.get('sku') as string,
       category: formData.get('category') as string,
-      price: tp, cost: tp, mrp: mrp, tp: tp,
+      price: tp, cost: purchasePrice, mrp: mrp, tp: tp, purchasePrice: purchasePrice,
       stock: stock,
       minStock: parseInt(formData.get('minStock') as string) || 0,
       description: formData.get('description') as string || '',
@@ -347,13 +384,26 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
                       <td className="px-6 py-5 text-center">
                          <div className="text-sm font-black text-gray-900">Rs. {(product.mrp || 0).toFixed(2)}</div>
                          <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TP: Rs. {(product.tp || 0).toFixed(2)}</div>
+                         <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">PP: Rs. {(product.purchasePrice || 0).toFixed(2)}</div>
                       </td>
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-black text-gray-900">{product.stock || 0}</span>
-                          <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                             <div className={`h-full rounded-full ${product.stock <= product.minStock ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${Math.min(((product.stock || 0) / Math.max(product.minStock * 2, 1)) * 100, 100)}%` }} />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-black text-gray-900">{product.stock || 0}</span>
+                            <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1">
+                               <div className={`h-full rounded-full ${product.stock <= product.minStock ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${Math.min(((product.stock || 0) / Math.max(product.minStock * 2, 1)) * 100, 100)}%` }} />
+                            </div>
                           </div>
+                          {role === 'Admin' && (
+                            <button 
+                              onClick={() => { setEditingProduct(product); setIsReturnModalOpen(true); }} 
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-100 text-amber-600 hover:bg-amber-100 rounded-lg transition-all shadow-sm ml-2" 
+                              title="Stock Return"
+                            >
+                              <RefreshCw size={12} />
+                              <span className="text-[9px] font-black uppercase tracking-widest whitespace-nowrap">Stock Return</span>
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-5">
@@ -483,20 +533,32 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
                         <td className="px-8 py-5 text-sm font-bold text-gray-600 whitespace-nowrap">{tx.date}</td>
                         <td className="px-8 py-5">
                           <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${tx.type === 'IN' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'}`}>
-                              {tx.type === 'IN' ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                              tx.type === 'IN' ? 'bg-green-50 text-green-600' : 
+                              tx.type === 'RETURN' ? 'bg-amber-50 text-amber-600' : 
+                              'bg-blue-50 text-blue-600'
+                            }`}>
+                              {tx.type === 'IN' ? <ArrowUpRight size={14} /> : 
+                               tx.type === 'RETURN' ? <RefreshCw size={14} /> : 
+                               <ArrowDownLeft size={14} />}
                             </div>
                             <span className="text-sm font-black text-gray-900">{tx.productName}</span>
                           </div>
                         </td>
                         <td className="px-8 py-5 text-center">
                           <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
-                            tx.type === 'IN' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                            tx.type === 'IN' ? 'bg-green-50 text-green-700 border-green-200' : 
+                            tx.type === 'RETURN' ? 'bg-amber-50 text-amber-700 border-amber-200' : 
+                            'bg-blue-50 text-blue-700 border-blue-200'
                           }`}>
                             STOCK {tx.type}
                           </span>
                         </td>
-                        <td className={`px-8 py-5 text-right font-black ${tx.type === 'IN' ? 'text-green-600' : 'text-blue-600'}`}>
+                        <td className={`px-8 py-5 text-right font-black ${
+                          tx.type === 'IN' ? 'text-green-600' : 
+                          tx.type === 'RETURN' ? 'text-amber-600' : 
+                          'text-blue-600'
+                        }`}>
                           {tx.type === 'IN' ? '+' : '-'}{tx.quantity}
                         </td>
                         <td className="px-8 py-5 text-[11px] font-bold text-gray-400 italic">{tx.note || 'Manual Adjustment'}</td>
@@ -589,7 +651,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">SKU Identity</label><input required name="sku" defaultValue={editingProduct?.sku} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label><input required name="category" defaultValue={editingProduct?.category} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label><input required type="number" step="0.01" name="mrp" defaultValue={editingProduct?.mrp} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-black" /></div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price / Cost (Rs.)</label><input required type="number" step="0.01" name="tp" defaultValue={editingProduct?.tp} className="w-full px-5 py-4 bg-yellow-50/30 border border-yellow-100 rounded-2xl font-black" /></div>
+                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label><input required type="number" step="0.01" name="tp" defaultValue={editingProduct?.tp} className="w-full px-5 py-4 bg-yellow-50/30 border border-yellow-100 rounded-2xl font-black" /></div>
+                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label><input required type="number" step="0.01" name="purchasePrice" defaultValue={editingProduct?.purchasePrice} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Stock Quantity</label><input required type="number" name="stock" defaultValue={editingProduct?.stock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Alert Level (Min Stock)</label><input required type="number" name="minStock" defaultValue={editingProduct?.minStock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
               </div>
@@ -612,7 +675,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
                </div>
                <button onClick={() => setIsRestockModalOpen(false)} className="p-3 hover:bg-red-50 text-red-600 rounded-2xl"><X size={28} /></button>
              </div>
-             <form onSubmit={handleRestock} className="p-12 space-y-8">
+             <form onSubmit={handleRestock} className="p-12 space-y-8 max-h-[70vh] overflow-y-auto">
                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
                   <p className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Target Asset</p>
                   <p className="text-lg font-black text-gray-900">{editingProduct.name}</p>
@@ -634,6 +697,57 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
 
                 <button disabled={isSaving || restockQty <= 0} className="w-full py-6 bg-green-600 text-white font-black rounded-[2rem] hover:bg-green-700 transition-all shadow-xl shadow-green-900/10 uppercase tracking-widest text-[10px] flex items-center justify-center gap-3">
                    {isSaving ? <Loader2 className="animate-spin" size={24} /> : <>Commence Inbound Flow <ArrowUpCircle size={20} /></>}
+                </button>
+             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Return Modal */}
+      {isReturnModalOpen && editingProduct && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden border border-gray-100">
+             <div className="p-10 border-b flex justify-between items-center bg-amber-50/50">
+               <div>
+                 <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">Stock Return</h3>
+                 <p className="text-xs font-bold text-amber-700 uppercase tracking-widest">Outgoing Return Record</p>
+               </div>
+               <button onClick={() => setIsReturnModalOpen(false)} className="p-3 hover:bg-red-50 text-red-600 rounded-2xl"><X size={28} /></button>
+             </div>
+             <form onSubmit={handleReturn} className="p-12 space-y-8 max-h-[70vh] overflow-y-auto">
+                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Target Asset</p>
+                  <p className="text-lg font-black text-gray-900">{editingProduct.name}</p>
+                  <p className="text-[10px] font-bold text-gray-500">Current Balance: {editingProduct.stock} Units</p>
+                </div>
+                
+                <div className="space-y-4">
+                   <div>
+                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 block text-center">Return Quantity</label>
+                     <input 
+                      autoFocus 
+                      type="number" 
+                      required 
+                      value={returnQty || ''} 
+                      onChange={e => setReturnQty(parseInt(e.target.value) || 0)}
+                      className="w-full py-6 text-4xl font-black text-center bg-gray-100 rounded-[2rem] outline-none focus:ring-8 focus:ring-amber-100 transition-all"
+                      placeholder="0"
+                     />
+                   </div>
+                   <div>
+                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 block">Return Reason / Note</label>
+                     <textarea 
+                      value={returnNote} 
+                      onChange={e => setReturnNote(e.target.value)}
+                      className="w-full p-5 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-amber-50 transition-all resize-none"
+                      placeholder="e.g. Damaged during transit, Customer changed mind..."
+                      rows={3}
+                     />
+                   </div>
+                </div>
+
+                <button disabled={isSaving || returnQty <= 0} className="w-full py-6 bg-amber-600 text-white font-black rounded-[2rem] hover:bg-amber-700 transition-all shadow-xl shadow-amber-900/10 uppercase tracking-widest text-[10px] flex items-center justify-center gap-3">
+                   {isSaving ? <Loader2 className="animate-spin" size={24} /> : <>Process Stock Return <RefreshCw size={20} /></>}
                 </button>
              </form>
           </div>

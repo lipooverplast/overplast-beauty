@@ -39,6 +39,33 @@ const getUserId = async () => {
   }
 };
 
+/**
+ * Helper to retry database operations on transient network errors.
+ */
+async function withRetry(fn: () => any, maxRetries = 3, initialDelay = 1000): Promise<any> {
+  let lastError: any;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const result = await fn();
+      return result;
+    } catch (error: any) {
+      lastError = error;
+      const isNetworkError = error?.message === 'Failed to fetch' || 
+                             error?.name === 'TypeError' && error?.message?.includes('fetch') ||
+                             error?.status === 0 || error?.status >= 500;
+      
+      if (isNetworkError && i < maxRetries - 1) {
+        const delay = initialDelay * Math.pow(2, i);
+        console.warn(`Database Network Error. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
 export const db = {
   generateUUID,
   isValidUUID,
@@ -46,7 +73,7 @@ export const db = {
   getProfile: async (id: string): Promise<Profile | null> => {
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
       try {
-        const { data, error } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle();
+        const { data, error } = await withRetry(() => supabase.from('profiles').select('*').eq('id', id).maybeSingle());
         if (error) return null;
         return data;
       } catch (e) { return null; }
@@ -57,40 +84,53 @@ export const db = {
   ensureProfile: async (user: any): Promise<Profile | null> => {
     if (!isSupabaseConfigured || !supabase || !user || !isValidUUID(user.id)) return null;
     try {
-      const { data: existingProfile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+      const { data: existingProfile } = await withRetry(() => supabase.from('profiles').select('*').eq('id', user.id).maybeSingle());
       if (existingProfile) return existingProfile;
-      const { data: adminCheck } = await supabase.from('profiles').select('id').eq('role', 'Admin').limit(1);
+      const { data: adminCheck } = await withRetry(() => supabase.from('profiles').select('id').eq('role', 'Admin').limit(1));
       const isFirstAdmin = !adminCheck || adminCheck.length === 0;
       const newProfile = { id: user.id, email: user.email, role: isFirstAdmin ? 'Admin' : 'Staff', status: 'Active' };
-      const { data: createdProfile, error: upsertError } = await supabase.from('profiles').upsert(newProfile).select().single();
+      const { data: createdProfile, error: upsertError } = await withRetry(() => supabase.from('profiles').upsert(newProfile).select().single());
       if (upsertError) throw upsertError;
       return createdProfile;
     } catch (e) { return null; }
   },
 
   getAllProfiles: async (): Promise<Profile[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase.from('profiles').select('*').order('email');
-      return data || [];
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { data, error } = await withRetry(() => supabase.from('profiles').select('*').order('email'));
+        if (error) throw error;
+        return data || [];
+      }
+    } catch (e: any) {
+      console.error("Fetch Profiles Error:", e);
     }
     return [];
   },
 
-  getProducts: async (): Promise<Product[]> => {
+  getProducts: async (userId?: string): Promise<Product[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.from('products').select('*').order('name');
+        let query = supabase.from('products').select('*').order('name');
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(p => ({
           id: p.id, name: p.name, sku: p.sku || '', category: p.category || 'General',
-          price: Number(p.tp) || Number(p.price) || 0, cost: Number(p.tp) || Number(p.cost) || 0,
+          price: Number(p.tp) || Number(p.price) || 0, cost: Number(p.cost) || 0,
+          purchasePrice: Number(p.cost) || 0,
           mrp: Number(p.mrp) || 0, tp: Number(p.tp) || 0, stock: Number(p.stock) || 0,
-          minStock: Number(p.min_stock) || 0, description: p.description || ''
+          minStock: Number(p.min_stock) || 0, description: p.description || '',
+          createdBy: p.user_id,
+          createdByName: p.user_email,
+          createdAt: p.created_at
         }));
       }
     } catch (err) {}
     const data = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-    return data ? JSON.parse(data) : [];
+    const products = data ? JSON.parse(data) : [];
+    if (userId) return products.filter((p: any) => p.userId === userId);
+    return products;
   },
 
   saveProducts: async (productsToSave: Product[]) => {
@@ -102,18 +142,25 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const userId = await getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      const userEmail = session?.user?.email;
+      if (!userId) throw new Error("Please log in again. Session expired.");
+      
       const dbRows = processedProducts.map(p => {
         const row: any = {
           id: p.id,
           name: p.name, sku: p.sku, category: p.category,
-          price: p.tp, cost: p.tp, mrp: p.mrp, tp: p.tp, stock: p.stock,
+          price: p.tp, cost: p.purchasePrice, mrp: p.mrp, tp: p.tp, stock: p.stock,
           min_stock: p.minStock, description: p.description
         };
-        if (userId) row.user_id = userId;
+        if (userId) {
+          row.user_id = userId;
+          row.user_email = userEmail;
+        }
         return row;
       });
-      const { error } = await supabase.from('products').upsert(dbRows);
+      const { error } = await withRetry(() => supabase.from('products').upsert(dbRows));
       if (error) throw new Error(error.message);
     }
     
@@ -129,25 +176,31 @@ export const db = {
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updated));
   },
 
-  getClients: async (): Promise<Client[]> => {
+  getClients: async (userId?: string): Promise<Client[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.from('clients').select('*').order('name');
+        let query = supabase.from('clients').select('*').order('name');
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(c => ({
           id: c.id,
           name: c.name,
-          email: c.email || '',
           phone: c.phone || '',
           address: c.address || '',
           doctorName: c.doctor_name || '',
           hospitalName: c.hospital_name || '',
-          doctorPhone: c.doctor_phone || ''
+          doctorPhone: c.doctor_phone || '',
+          createdBy: c.user_id,
+          createdByName: c.user_email,
+          createdAt: c.created_at
         }));
       }
     } catch (err) {}
     const data = localStorage.getItem(STORAGE_KEYS.CLIENTS);
-    return data ? JSON.parse(data) : [];
+    const clients = data ? JSON.parse(data) : [];
+    if (userId) return clients.filter((c: any) => c.createdBy === userId);
+    return clients;
   },
 
   saveClients: async (clientsToSave: Client[]) => {
@@ -159,22 +212,28 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const userId = await getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      const userEmail = session?.user?.email;
+      if (!userId) throw new Error("Please log in again. Session expired.");
+      
       const dbRows = processedClients.map(c => {
         const row: any = { 
           id: c.id, 
           name: c.name, 
-          email: c.email || '', 
           phone: c.phone || '', 
           address: c.address || '',
           doctor_name: c.doctorName || '',
           hospital_name: c.hospitalName || '',
           doctor_phone: c.doctorPhone || ''
         };
-        if (userId) row.user_id = userId;
+        if (userId) {
+          row.user_id = userId;
+          row.user_email = userEmail;
+        }
         return row;
       });
-      const { error } = await supabase.from('clients').upsert(dbRows);
+      const { error } = await withRetry(() => supabase.from('clients').upsert(dbRows));
       if (error) throw error;
     }
     
@@ -190,28 +249,38 @@ export const db = {
     localStorage.setItem(STORAGE_KEYS.CLIENTS, JSON.stringify(updated));
   },
 
-  getInvoices: async (): Promise<Invoice[]> => {
+  getInvoices: async (userId?: string): Promise<Invoice[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.from('invoices').select('*').order('date', { ascending: false });
+        let query = supabase.from('invoices').select('*').order('date', { ascending: false });
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(inv => ({
           id: inv.id, invoiceNumber: inv.invoice_number, clientId: inv.client_id,
           clientName: inv.client_name, date: inv.date, items: inv.items || [],
-          subtotal: Number(inv.subtotal), taxRate: Number(inv.tax_rate),
+          subtotal: Number(inv.subtotal), 
+          discountRate: Number(inv.discount_rate || 0),
+          discountTotal: Number(inv.discount_total || 0),
+          taxRate: Number(inv.tax_rate),
           taxTotal: Number(inv.tax_total), total: Number(inv.total),
           status: inv.status, 
           paymentMethod: inv.payment_method || 'Cash',
-          paidAmount: Number(inv.paid_amount || 0)
+          paidAmount: Number(inv.paid_amount || 0),
+          createdBy: inv.user_id,
+          createdByName: inv.user_email,
+          createdAt: inv.created_at
         }));
       }
     } catch (err) {}
     const data = localStorage.getItem(STORAGE_KEYS.INVOICES);
-    return (data ? JSON.parse(data) : []).map((inv: any) => ({
+    const invoices = (data ? JSON.parse(data) : []).map((inv: any) => ({
       ...inv,
       items: inv.items || [],
       paidAmount: inv.paidAmount || 0
     }));
+    if (userId) return invoices.filter((inv: any) => inv.createdBy === userId);
+    return invoices;
   },
 
   saveInvoices: async (invoicesToSave: Invoice[]) => {
@@ -226,23 +295,34 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const userId = await getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      const userEmail = session?.user?.email;
       if (!userId) throw new Error("Please log in again. Session expired.");
       
       const dbRows = processedInvoices.map(inv => {
         const row: any = {
           id: inv.id,
           user_id: userId,
+          user_email: userEmail,
           invoice_number: inv.invoiceNumber, client_id: inv.clientId, client_name: inv.clientName,
-          date: inv.date, items: inv.items, subtotal: inv.subtotal, tax_rate: inv.taxRate,
+          date: inv.date, items: inv.items, subtotal: inv.subtotal, 
+          discount_rate: inv.discountRate || 0,
+          discount_total: inv.discountTotal || 0,
+          tax_rate: inv.taxRate,
           tax_total: inv.taxTotal, total: inv.total, status: inv.status, 
           payment_method: inv.paymentMethod || 'Cash',
           paid_amount: inv.paidAmount || 0
         };
         return row;
       });
-      const { error } = await supabase.from('invoices').upsert(dbRows);
-      if (error) throw new Error(error.message);
+      const { error } = await withRetry(() => supabase.from('invoices').upsert(dbRows));
+      if (error) {
+        if (error.code === '42703' || error.message.includes('column')) {
+          throw new Error("Missing 'discount' or 'tax' columns in 'invoices' table. Please run the Repair Script in Settings.");
+        }
+        throw new Error(error.message);
+      }
     }
     
     // Merge with local storage
@@ -257,10 +337,12 @@ export const db = {
     localStorage.setItem(STORAGE_KEYS.INVOICES, JSON.stringify(updated));
   },
 
-  getRecurringInvoices: async (): Promise<RecurringInvoice[]> => {
+  getRecurringInvoices: async (userId?: string): Promise<RecurringInvoice[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.from('recurring_invoices').select('*');
+        let query = supabase.from('recurring_invoices').select('*');
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(ri => ({
           id: ri.id,
@@ -268,18 +350,26 @@ export const db = {
           clientName: ri.client_name,
           items: ri.items || [],
           subtotal: Number(ri.subtotal),
+          discountRate: Number(ri.discount_rate || 0),
+          discountTotal: Number(ri.discount_total || 0),
           taxRate: Number(ri.tax_rate),
+          taxTotal: Number(ri.tax_total || 0),
           total: Number(ri.total),
           frequency: ri.frequency,
           startDate: ri.start_date,
           nextRunDate: ri.next_run_date,
           status: ri.status,
-          lastGeneratedDate: ri.last_generated_date
+          lastGeneratedDate: ri.last_generated_date,
+          createdBy: ri.user_id,
+          createdByName: ri.user_email,
+          createdAt: ri.created_at
         }));
       }
     } catch (err) {}
     const data = localStorage.getItem(STORAGE_KEYS.RECURRING);
-    return data ? JSON.parse(data) : [];
+    const recurring = data ? JSON.parse(data) : [];
+    if (userId) return recurring.filter((ri: any) => ri.createdBy === userId);
+    return recurring;
   },
 
   saveRecurringInvoices: async (recurring: RecurringInvoice[]) => {
@@ -291,18 +381,24 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const userId = await getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      const userEmail = session?.user?.email;
       if (!userId) throw new Error("Please log in again. Session expired.");
 
       const dbRows = processedRecurring.map(ri => {
         const row: any = {
           id: ri.id,
           user_id: userId,
+          user_email: userEmail,
           client_id: ri.clientId, 
           client_name: ri.clientName, 
           items: ri.items,
           subtotal: ri.subtotal, 
+          discount_rate: ri.discountRate || 0,
+          discount_total: ri.discountTotal || 0,
           tax_rate: ri.taxRate, 
+          tax_total: ri.taxTotal || 0,
           total: ri.total,
           frequency: ri.frequency, 
           start_date: ri.startDate, 
@@ -311,10 +407,13 @@ export const db = {
         };
         return row;
       });
-      const { error } = await supabase.from('recurring_invoices').upsert(dbRows);
+      const { error } = await withRetry(() => supabase.from('recurring_invoices').upsert(dbRows));
       if (error) {
          if (error.code === '42P01') {
            throw new Error("Missing 'recurring_invoices' table. Please run the Repair Script in Settings.");
+         }
+         if (error.code === '42703' || error.message.includes('column')) {
+           throw new Error("Missing 'discount' or 'tax' columns in 'recurring_invoices' table. Please run the Repair Script in Settings.");
          }
          throw new Error(error.message);
       }
@@ -406,33 +505,44 @@ export const db = {
     }
   },
 
-  getStockTransactions: async (): Promise<StockTransaction[]> => {
+  getStockTransactions: async (userId?: string): Promise<StockTransaction[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.from('stock_transactions').select('*').order('date', { ascending: false });
+        let query = supabase.from('stock_transactions').select('*').order('date', { ascending: false });
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(t => ({
           id: t.id, productId: t.product_id, productName: t.product_name,
-          type: t.type, quantity: Number(t.quantity), date: t.date, note: t.note
+          type: t.type, quantity: Number(t.quantity), date: t.date, note: t.note,
+          createdBy: t.user_id,
+          createdByName: t.user_email,
+          createdAt: t.created_at
         }));
       }
     } catch (err) {}
     const data = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
-    return data ? JSON.parse(data) : [];
+    const transactions = data ? JSON.parse(data) : [];
+    if (userId) return transactions.filter((t: any) => t.createdBy === userId);
+    return transactions;
   },
 
   saveStockTransactions: async (transactions: StockTransaction[]) => {
     if (isSupabaseConfigured && supabase) {
-      const userId = await getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      const userEmail = session?.user?.email;
       const dbRows = transactions.map(t => {
         const row: any = {
-          user_id: userId, product_id: t.productId, product_name: t.productName,
+          user_id: userId, 
+          user_email: userEmail,
+          product_id: t.productId, product_name: t.productName,
           type: t.type, quantity: t.quantity, date: t.date, note: t.note
         };
         row.id = isValidUUID(t.id) ? t.id : generateUUID();
         return row;
       });
-      const { error } = await supabase.from('stock_transactions').upsert(dbRows);
+      const { error } = await withRetry(() => supabase.from('stock_transactions').upsert(dbRows));
       if (error) throw new Error(error.message);
     }
     localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
@@ -440,7 +550,14 @@ export const db = {
 
   updateUserStatus: async (id: string, status: UserStatus) => {
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      const { error } = await supabase.from('profiles').update({ status }).eq('id', id);
+      const { error } = await withRetry(() => supabase.from('profiles').update({ status }).eq('id', id));
+      if (error) throw error;
+    }
+  },
+
+  deleteProfile: async (id: string) => {
+    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
+      const { error } = await withRetry(() => supabase.from('profiles').delete().eq('id', id));
       if (error) throw error;
     }
   },
@@ -450,7 +567,7 @@ export const db = {
       if (isSupabaseConfigured && supabase) {
         let query = supabase.from('payments').select('*').order('date', { ascending: false });
         if (invoiceId) query = query.eq('invoice_id', invoiceId);
-        const { data, error } = await query;
+        const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(p => ({
           id: p.id, invoiceId: p.invoice_id, amount: Number(p.amount),
@@ -477,7 +594,7 @@ export const db = {
         date: payment.date,
         note: payment.note
       };
-      const { error } = await supabase.from('payments').upsert(row);
+      const { error } = await withRetry(() => supabase.from('payments').upsert(row));
       if (error) throw error;
     }
 

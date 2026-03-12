@@ -9,16 +9,30 @@ import { RecurringInvoice, Product, Client, InvoiceItem, Frequency, UserRole } f
 import { db } from '../db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { APP_LOGO_URL, APP_NAME } from '../constants';
 
 const RecurringLogo = () => (
   <div className="flex items-center gap-4">
-    <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center p-2 shadow-lg">
-      <img src="/logo.svg" alt="Overplast Beauty" className="w-full h-full object-contain" />
+    <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center p-2 shadow-lg border border-gray-100">
+      <img 
+        src={APP_LOGO_URL} 
+        alt={APP_NAME} 
+        className="w-full h-full object-contain" 
+        referrerPolicy="no-referrer"
+        onError={(e) => {
+          e.currentTarget.src = "https://picsum.photos/seed/overplast/200/200";
+        }}
+      />
     </div>
     <div className="flex flex-col">
         <h1 className="text-3xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST</h1>
         <p className="font-beauty text-xl text-gray-800 italic -mt-1 leading-none">Beauty</p>
         <p className="text-[7px] font-black text-yellow-600 uppercase tracking-widest mt-1">Cloud Base Management System</p>
+        <div className="mt-2 space-y-0.5 border-t border-gray-100 pt-1">
+          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
+          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">Ph: +92 301 844 4449 | +92 332 977 9945</p>
+          <p className="text-[7px] font-bold text-gray-400 lowercase tracking-tight">Email: care@overplast.org</p>
+        </div>
     </div>
   </div>
 );
@@ -37,6 +51,8 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
   const [selectedItems, setSelectedItems] = useState<InvoiceItem[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [frequency, setFrequency] = useState<Frequency>('Monthly');
+  const [taxRate, setTaxRate] = useState(0);
+  const [discountRate, setDiscountRate] = useState(0);
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [activeAssetId, setActiveAssetId] = useState('');
   
@@ -103,6 +119,9 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
 
     setIsSaving(true);
     const subtotalValue = calculateSubtotal();
+    const discountTotal = subtotalValue * (discountRate / 100);
+    const taxTotal = (subtotalValue - discountTotal) * (taxRate / 100);
+    const grandTotal = subtotalValue - discountTotal + taxTotal;
     
     const newRecurring: RecurringInvoice = {
       id: db.generateUUID(), 
@@ -110,8 +129,11 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
       clientName: client.name,
       items: selectedItems,
       subtotal: subtotalValue,
-      taxRate: 0,
-      total: subtotalValue,
+      discountRate,
+      discountTotal,
+      taxRate,
+      taxTotal,
+      total: grandTotal,
       frequency,
       startDate,
       nextRunDate: startDate,
@@ -286,7 +308,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                {(ri.items || []).slice(0, 3).map((item, idx) => (
                  <div key={idx} className="flex justify-between items-center text-xs font-bold text-gray-600">
                     <span className="truncate max-w-[140px]">{item.quantity}x {item.name}</span>
-                    <span className="font-black text-gray-900">Rs. {item.total.toLocaleString()}</span>
+                    <span className="font-black text-gray-900">Rs. {(item.total || 0).toLocaleString()}</span>
                  </div>
                ))}
                {(ri.items || []).length > 3 && (
@@ -297,7 +319,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
             <div className="flex items-center justify-between pt-6 border-t border-gray-100">
                <div>
                  <p className="text-[9px] text-gray-400 uppercase font-black tracking-widest mb-1">Per Cycle Value</p>
-                 <p className="text-2xl font-black text-gray-900 tracking-tighter">Rs. {ri.total.toLocaleString()}</p>
+                 <p className="text-2xl font-black text-gray-900 tracking-tighter">Rs. {(ri.total || 0).toLocaleString()}</p>
                </div>
                <button 
                 type="button"
@@ -419,6 +441,24 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                     className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-50 font-black transition-all" 
                   />
                 </div>
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 mb-3 uppercase tracking-widest">Discount (%)</label>
+                  <input 
+                    type="number" 
+                    value={discountRate}
+                    onChange={(e) => setDiscountRate(parseFloat(e.target.value) || 0)}
+                    className="w-full px-6 py-4 bg-red-50 border border-red-100 text-red-600 rounded-2xl outline-none focus:ring-4 focus:ring-red-50 font-black transition-all text-center" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 mb-3 uppercase tracking-widest">Tax (%)</label>
+                  <input 
+                    type="number" 
+                    value={taxRate}
+                    onChange={(e) => setTaxRate(parseFloat(e.target.value) || 0)}
+                    className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-50 font-black transition-all text-center" 
+                  />
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -446,8 +486,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                           <th className="px-8 py-6">Item Description</th>
                           <th className="px-6 py-6 text-center">Quantity</th>
                           <th className="px-6 py-6 text-center">MRP</th>
-                          <th className="px-6 py-6 text-center">Tp Per Unit</th>
-                          <th className="px-6 py-6 text-center">Discount</th>
+                          <th className="px-6 py-6 text-center">Trade Price</th>
                           <th className="px-8 py-6 text-right">Total</th>
                           <th className="px-6 py-6"></th>
                         </tr>
@@ -474,11 +513,18 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                               </div>
                             </td>
                             <td className="px-6 py-5 text-center text-xs font-bold text-gray-400 line-through">Rs. {(item.mrp || 0).toLocaleString()}</td>
-                            <td className="px-6 py-5 text-center font-black text-gray-900">Rs. {(item.tp || 0).toLocaleString()}</td>
                             <td className="px-6 py-5 text-center">
-                              <span className="font-black text-[10px] text-red-600">-{item.discount}%</span>
+                               <input 
+                                  type="number" 
+                                  value={item.tp} 
+                                  onChange={(e) => {
+                                    const tp = parseFloat(e.target.value) || 0;
+                                    setSelectedItems(selectedItems.map(si => si.productId === item.productId ? { ...si, tp, total: si.quantity * tp } : si));
+                                  }}
+                                  className="w-24 bg-yellow-50 border border-yellow-100 text-center font-black rounded-xl p-2.5 text-xs outline-none text-yellow-700"
+                                />
                             </td>
-                            <td className="px-8 py-5 text-right font-black text-gray-900">Rs. {item.total.toLocaleString()}</td>
+                            <td className="px-8 py-5 text-right font-black text-gray-900">Rs. {(item.total || 0).toLocaleString()}</td>
                             <td className="px-6 py-5 text-right">
                               <button type="button" onClick={() => removeItem(item.productId)} className="text-red-300 hover:text-red-600 p-2 transition-colors"><Trash2 size={20} /></button>
                             </td>
@@ -497,14 +543,22 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
             </div>
 
             <div className="p-10 bg-gray-50 border-t border-gray-100 flex flex-col md:flex-row items-center justify-between gap-8">
-              <div className="flex items-center gap-16">
+              <div className="grid grid-cols-4 gap-12">
                 <div>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Cycle Subtotal</p>
-                  <p className="text-2xl font-black text-gray-900">Rs. {calculateSubtotal().toLocaleString()}</p>
+                  <p className="text-2xl font-black text-gray-900">Rs. {(calculateSubtotal() || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Discount ({discountRate}%)</p>
+                  <p className="text-2xl font-black text-red-600">Rs. {(calculateSubtotal() * (discountRate / 100) || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tax ({taxRate}%)</p>
+                  <p className="text-2xl font-black text-yellow-600">Rs. {((calculateSubtotal() - (calculateSubtotal() * (discountRate / 100))) * (taxRate / 100) || 0).toLocaleString()}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1">Recurring Total</p>
-                  <p className="text-4xl font-black text-black tracking-tighter">Rs. {calculateSubtotal().toLocaleString()}</p>
+                  <p className="text-4xl font-black text-black tracking-tighter">Rs. {(calculateSubtotal() - (calculateSubtotal() * (discountRate / 100)) + ((calculateSubtotal() - (calculateSubtotal() * (discountRate / 100))) * (taxRate / 100)) || 0).toLocaleString()}</p>
                 </div>
               </div>
               <div className="flex gap-4 w-full md:w-auto">
@@ -596,8 +650,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                       <th className="py-6 text-left text-[11px] font-black uppercase tracking-widest">Item Description</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">MRP</th>
-                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Tp Per Unit</th>
-                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Discount</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Trade Price</th>
                       <th className="py-6 text-right text-[11px] font-black uppercase tracking-widest">Total</th>
                     </tr>
                   </thead>
@@ -610,23 +663,32 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                         <td className="py-6 text-center font-black text-gray-900">{item.quantity}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.mrp}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.tp}</td>
-                        <td className="py-6 text-center">
-                          <span className="font-black text-[10px] text-red-600">-{item.discount}%</span>
-                        </td>
-                        <td className="py-6 text-right font-black text-gray-900">Rs. {item.total.toLocaleString()}</td>
+                        <td className="py-6 text-right font-black text-gray-900">Rs. {(item.total || 0).toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-4 border-black">
-                      <td colSpan={4}></td>
+                      <td colSpan={3}></td>
                       <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Cycle Subtotal</td>
-                      <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {viewingRecurring.subtotal.toLocaleString()}</td>
+                      <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {(viewingRecurring.subtotal || 0).toLocaleString()}</td>
+                    </tr>
+                    {viewingRecurring.discountTotal > 0 && (
+                      <tr>
+                        <td colSpan={3}></td>
+                        <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Discount ({viewingRecurring.discountRate}%)</td>
+                        <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingRecurring.discountTotal || 0).toLocaleString()}</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td colSpan={3}></td>
+                      <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingRecurring.taxRate}%)</td>
+                      <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingRecurring.taxTotal || 0).toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td colSpan={4}></td>
+                      <td colSpan={3}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Master Amount</td>
-                      <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {viewingRecurring.total.toLocaleString()}</td>
+                      <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {(viewingRecurring.total || 0).toLocaleString()}</td>
                     </tr>
                   </tfoot>
                 </table>

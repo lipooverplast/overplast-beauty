@@ -20,30 +20,39 @@ export interface Product {
   cost: number;
   mrp: number;
   tp: number;
+  purchasePrice: number;
   stock: number;
   minStock: number;
   description: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export interface StockTransaction {
   id: string;
   productId: string;
   productName: string;
-  type: 'IN' | 'OUT';
+  type: 'IN' | 'OUT' | 'RETURN';
   quantity: number;
   date: string;
   note?: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export interface Client {
   id: string;
   name: string; // Patient Name
-  email: string;
   phone: string; // Patient Mobile No
   address: string;
   doctorName: string;
   hospitalName: string;
   doctorPhone: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export interface InvoiceItem {
@@ -73,12 +82,17 @@ export interface Invoice {
   date: string;
   items: InvoiceItem[];
   subtotal: number;
+  discountRate: number;
+  discountTotal: number;
   taxRate: number; 
   taxTotal: number;
   total: number;
   status: 'Paid' | 'Pending' | 'Overdue';
   paymentMethod: 'Cash' | 'Credit';
   paidAmount?: number;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export type Frequency = 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
@@ -89,13 +103,19 @@ export interface RecurringInvoice {
   clientName: string;
   items: InvoiceItem[];
   subtotal: number;
+  discountRate: number;
+  discountTotal: number;
   taxRate: number;
+  taxTotal: number;
   total: number;
   frequency: Frequency;
   startDate: string;
   nextRunDate: string;
   status: 'Active' | 'Paused' | 'Completed';
   lastGeneratedDate?: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
 }
 
 export type ViewType = 'dashboard' | 'inventory' | 'invoices' | 'recurring' | 'clients' | 'settings' | 'users' | 'admin-office' | 'reports';

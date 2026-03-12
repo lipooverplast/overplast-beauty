@@ -34,7 +34,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
     const clientPayload: Client = {
       id: editingClient?.id || db.generateUUID(),
       name: formData.get('name') as string,
-      email: formData.get('email') as string,
       phone: formData.get('phone') as string,
       address: formData.get('address') as string,
       doctorName: formData.get('doctorName') as string,
@@ -162,10 +161,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
               
               <div className="space-y-4">
                 <div className="flex items-center gap-3 text-xs text-gray-600 font-bold">
-                  <div className="p-2 bg-gray-50 rounded-lg text-gray-400"><Mail size={14} /></div>
-                  <span className="truncate">{client.email || 'No Email'}</span>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-gray-600 font-bold">
                   <div className="p-2 bg-gray-50 rounded-lg text-gray-400"><Phone size={14} /></div>
                   <span>{client.phone || 'No Phone'}</span>
                 </div>
@@ -266,10 +261,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-[10px] font-black text-gray-400 mb-2 uppercase tracking-widest">Patient Email</label>
-                  <input required type="email" name="email" defaultValue={editingClient?.email} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-50 font-bold text-sm transition-all" placeholder="patient@example.com" />
-                </div>
-                <div>
                   <label className="block text-[10px] font-black text-gray-400 mb-2 uppercase tracking-widest">Patient Mobile No</label>
                   <input required name="phone" defaultValue={editingClient?.phone} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-50 font-bold text-sm transition-all" placeholder="0321-XXXXXXX" />
                 </div>
@@ -329,12 +320,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
             
             <div className="flex-1 overflow-y-auto p-12 space-y-10">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                <div className="space-y-2">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em]">Patient Email</p>
-                  <p className="text-sm font-bold text-gray-900 flex items-center gap-3">
-                    <Mail size={16} className="text-blue-500" /> {viewingClientDetails.email || 'N/A'}
-                  </p>
-                </div>
                 <div className="space-y-2">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em]">Patient Mobile</p>
                   <p className="text-sm font-bold text-gray-900 flex items-center gap-3">

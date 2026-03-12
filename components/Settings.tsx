@@ -37,11 +37,12 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 CREATE TABLE IF NOT EXISTS public.products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id),
+  user_email TEXT,
   name TEXT NOT NULL,
   sku TEXT,
   category TEXT DEFAULT 'General',
   price NUMERIC DEFAULT 0,
-  cost NUMERIC DEFAULT 0,
+  cost NUMERIC DEFAULT 0, -- Purchase Price
   mrp NUMERIC DEFAULT 0,
   tp NUMERIC DEFAULT 0,
   stock INTEGER DEFAULT 0,
@@ -53,8 +54,8 @@ CREATE TABLE IF NOT EXISTS public.products (
 CREATE TABLE IF NOT EXISTS public.clients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id),
+  user_email TEXT,
   name TEXT NOT NULL,
-  email TEXT,
   phone TEXT,
   address TEXT,
   doctor_name TEXT,
@@ -66,12 +67,15 @@ CREATE TABLE IF NOT EXISTS public.clients (
 CREATE TABLE IF NOT EXISTS public.invoices (
   id TEXT PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id),
+  user_email TEXT,
   invoice_number TEXT NOT NULL,
   client_id TEXT,
   client_name TEXT,
   date DATE DEFAULT CURRENT_DATE,
   items JSONB,
   subtotal NUMERIC DEFAULT 0,
+  discount_rate NUMERIC DEFAULT 0,
+  discount_total NUMERIC DEFAULT 0,
   tax_rate NUMERIC DEFAULT 0,
   tax_total NUMERIC DEFAULT 0,
   total NUMERIC DEFAULT 0,
@@ -84,6 +88,7 @@ CREATE TABLE IF NOT EXISTS public.invoices (
 CREATE TABLE IF NOT EXISTS public.payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id),
+  user_email TEXT,
   invoice_id TEXT,
   amount NUMERIC DEFAULT 0,
   date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -94,11 +99,15 @@ CREATE TABLE IF NOT EXISTS public.payments (
 CREATE TABLE IF NOT EXISTS public.recurring_invoices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id),
+  user_email TEXT,
   client_id TEXT,
   client_name TEXT,
   items JSONB,
   subtotal NUMERIC DEFAULT 0,
+  discount_rate NUMERIC DEFAULT 0,
+  discount_total NUMERIC DEFAULT 0,
   tax_rate NUMERIC DEFAULT 0,
+  tax_total NUMERIC DEFAULT 0,
   total NUMERIC DEFAULT 0,
   frequency TEXT,
   start_date DATE DEFAULT CURRENT_DATE,
@@ -111,6 +120,7 @@ CREATE TABLE IF NOT EXISTS public.recurring_invoices (
 CREATE TABLE IF NOT EXISTS public.stock_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id),
+  user_email TEXT,
   product_id TEXT,
   product_name TEXT,
   type TEXT,
@@ -130,10 +140,24 @@ ALTER TABLE public.stock_transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments DISABLE ROW LEVEL SECURITY;
 
 -- ADD MISSING COLUMNS TO EXISTING TABLES
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS user_email TEXT;
+
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS doctor_name TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS hospital_name TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS doctor_phone TEXT;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS paid_amount NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_rate NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_total NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS tax_total NUMERIC DEFAULT 0;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS discount_rate NUMERIC DEFAULT 0;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS discount_total NUMERIC DEFAULT 0;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS tax_rate NUMERIC DEFAULT 0;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS tax_total NUMERIC DEFAULT 0;
 
 -- GRANT ALL PERMISSIONS TO USERS
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, postgres;
@@ -157,7 +181,7 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, postgres;
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl pb-20 mx-auto">
+    <div className="space-y-8 animate-in fade-in duration-500 pb-20 mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm">
         <div>
           <h2 className="text-3xl font-black text-gray-900 tracking-tight uppercase">Base Infrastructure</h2>

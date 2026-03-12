@@ -1,5 +1,5 @@
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { createClient } from '@supabase/supabase-js';
 
 const storedUrl = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem('SUPABASE_URL_OVERRIDE') || '';
 const storedKey = import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.getItem('SUPABASE_ANON_KEY_OVERRIDE') || '';

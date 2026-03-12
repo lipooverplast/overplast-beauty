@@ -22,47 +22,65 @@ import {
   CheckCircle,
   PlusCircle,
   ClipboardList,
-  UserPlus
+  UserPlus,
+  RefreshCw
 } from 'lucide-react';
 import { Product, Invoice, UserRole, ViewType } from '../types';
 import { db } from '../db';
 import { geminiService } from '../geminiService';
+import { APP_LOGO_URL, APP_NAME } from '../constants';
 
 interface DashboardProps {
   products: Product[];
   invoices: Invoice[];
   clients: any[];
   role: UserRole;
+  userId: string;
   onNavigate: (view: ViewType) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, userId, onNavigate }) => {
   const [aiInsights, setAiInsights] = useState<string>("Reviewing Overplast Beauty metrics...");
   const [loadingInsights, setLoadingInsights] = useState(true);
+  const [lastInsightUpdate, setLastInsightUpdate] = useState<number>(0);
   const [monthlyIn, setMonthlyIn] = useState(0);
   const [monthlyOut, setMonthlyOut] = useState(0);
   const [greeting, setGreeting] = useState('');
 
-  useEffect(() => {
-    setGreeting('Welcome');
+  const fetchInsights = async (force = false) => {
+    if (role !== 'Admin') {
+      setLoadingInsights(false);
+      return;
+    }
+    
+    // Only auto-fetch if it's been more than 30 minutes or if forced
+    const now = Date.now();
+    if (!force && lastInsightUpdate > 0 && (now - lastInsightUpdate < 1000 * 60 * 30)) {
+      setLoadingInsights(false);
+      return;
+    }
 
-    const fetchInsights = async () => {
-      if (role !== 'Admin') {
-        setLoadingInsights(false);
-        return;
-      }
-      setLoadingInsights(true);
+    setLoadingInsights(true);
+    try {
       const insight = await geminiService.analyzeInventory(products);
       setAiInsights(insight);
+      setLastInsightUpdate(now);
+    } catch (e) {
+      setAiInsights("AI Advisor is currently resting. Check back later.");
+    } finally {
       setLoadingInsights(false);
-    };
+    }
+  };
+
+  useEffect(() => {
+    setGreeting('Welcome');
     if (products.length > 0) fetchInsights();
     else setLoadingInsights(false);
-  }, [products, role]);
+  }, [role]); // Only re-fetch if role changes (Admin vs Staff)
 
   useEffect(() => {
     const fetchTransactions = async () => {
-      const txs = await db.getStockTransactions();
+      const txs = await db.getStockTransactions(role === 'Admin' ? undefined : userId);
       const currentMonth = new Date().toISOString().slice(0, 7);
       const inUnits = txs.filter(t => t.type === 'IN' && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
       const outUnits = txs.filter(t => t.type === 'OUT' && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
@@ -70,16 +88,25 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, onNavig
       setMonthlyOut(outUnits);
     };
     fetchTransactions();
-  }, [products, invoices]);
+  }, [products, invoices, userId, role]);
 
   const totalRevenue = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+  const netSales = invoices.reduce((sum, inv) => sum + ((inv.subtotal || 0) - (inv.discountTotal || 0)), 0);
+  const totalCost = invoices.reduce((sum, inv) => {
+    return sum + (inv.items || []).reduce((itemSum, item) => {
+      const product = products.find(p => p.id === item.productId);
+      const purchasePrice = product?.purchasePrice || 0;
+      return itemSum + (purchasePrice * item.quantity);
+    }, 0);
+  }, 0);
+  const estimatedProfit = netSales - totalCost;
   const lowStockItems = products.filter(p => p.stock <= p.minStock).length;
   const inventoryValue = products.reduce((sum, p) => sum + (p.tp * p.stock), 0);
 
   const adminStats = [
     { label: 'Net Asset Value', value: `Rs. ${inventoryValue.toLocaleString()}`, icon: Wallet, color: 'text-indigo-600', bg: 'bg-indigo-50', trend: 'Valuation' },
     { label: 'Revenue (Total)', value: `Rs. ${totalRevenue.toLocaleString()}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50', trend: 'Inbound' },
-    { label: 'Stock Inflow', value: monthlyIn, icon: ArrowUpRight, color: 'text-amber-600', bg: 'bg-amber-50', trend: 'Units' },
+    { label: 'Estimated Profit', value: `Rs. ${estimatedProfit.toLocaleString()}`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50', trend: 'Net Gain' },
     { label: 'Critical Assets', value: lowStockItems, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50', trend: 'Reorder Now' },
   ];
 
@@ -95,16 +122,24 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, onNavig
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-20">
       <div className="relative overflow-hidden bg-white p-10 rounded-[3.5rem] border border-gray-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-8 z-10">
-          <div className="w-24 h-24 bg-black rounded-3xl flex items-center justify-center shadow-2xl p-3">
-            <img src="/logo.svg" alt="Overplast Beauty" className="w-full h-full object-contain" />
+        <div className="flex items-center gap-8 z-10 min-w-0">
+          <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center shadow-2xl p-3 border border-gray-100 flex-shrink-0">
+            <img 
+              src={APP_LOGO_URL} 
+              alt={APP_NAME} 
+              className="w-full h-full object-contain" 
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.src = "https://picsum.photos/seed/overplast/200/200";
+              }}
+            />
           </div>
-          <div>
-            <h1 className="text-4xl font-black text-gray-900 tracking-tighter leading-none mb-2">
+          <div className="min-w-0">
+            <h1 className="text-2xl md:text-4xl font-black text-gray-900 tracking-tighter leading-tight mb-2 truncate">
               {greeting}, {role === 'Admin' ? 'Master Admin' : 'Staff Member'}
             </h1>
-            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-              <Fingerprint size={14} className="text-yellow-600" /> Overplast Node verified & synchronized
+            <p className="text-[10px] md:text-sm font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 truncate">
+              <Fingerprint size={14} className="text-yellow-600 flex-shrink-0" /> Overplast Node verified & synchronized
             </p>
           </div>
         </div>
@@ -123,6 +158,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, onNavig
           </div>
         </div>
         <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-50 rounded-full -mr-32 -mt-32 blur-[80px] opacity-50"></div>
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-50 rounded-full -ml-24 -mb-24 blur-[60px] opacity-40"></div>
       </div>
 
       {role === 'Admin' && (
@@ -246,12 +282,22 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, onNavig
             <div className="bg-black p-10 rounded-[4rem] text-white shadow-2xl relative overflow-hidden group border border-gray-800 animate-in zoom-in-95">
               <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/20 rounded-full blur-[60px] group-hover:bg-yellow-500/40 transition-all duration-700"></div>
               <div className="relative z-10">
-                <div className="flex items-center gap-4 mb-10">
-                  <div className="p-3 bg-yellow-500/10 text-yellow-500 rounded-2xl backdrop-blur-md border border-yellow-500/20 animate-pulse"><Sparkles size={24} /></div>
-                  <div>
-                    <h3 className="font-black text-xs uppercase tracking-[0.4em] mb-1">AI Stock Advisor</h3>
-                    <p className="text-[8px] font-black text-yellow-500/50 uppercase tracking-widest">Master Intelligence Hub</p>
+                <div className="flex items-center justify-between mb-10">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-yellow-500/10 text-yellow-500 rounded-2xl backdrop-blur-md border border-yellow-500/20 animate-pulse"><Sparkles size={24} /></div>
+                    <div>
+                      <h3 className="font-black text-xs uppercase tracking-[0.4em] mb-1">AI Stock Advisor</h3>
+                      <p className="text-[8px] font-black text-yellow-500/50 uppercase tracking-widest">Master Intelligence Hub</p>
+                    </div>
                   </div>
+                  <button 
+                    onClick={() => fetchInsights(true)} 
+                    disabled={loadingInsights}
+                    className="p-2 hover:bg-white/10 rounded-xl transition-colors text-white/40 hover:text-white"
+                    title="Refresh AI Insights"
+                  >
+                    <RefreshCw size={16} className={loadingInsights ? 'animate-spin' : ''} />
+                  </button>
                 </div>
                 {loadingInsights ? (
                   <div className="space-y-6">

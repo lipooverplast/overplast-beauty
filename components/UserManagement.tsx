@@ -5,7 +5,7 @@ import { Profile, UserRole, UserStatus } from '../types';
 import { 
   Loader2, UserCheck, Shield, ShieldCheck, Mail, Clock, 
   RefreshCw, UserMinus, MoreVertical, Search, CheckCircle2,
-  Ban, ShieldAlert, ArrowUpRight, ArrowDownRight
+  Ban, ShieldAlert, ArrowUpRight, ArrowDownRight, Trash2, AlertTriangle
 } from 'lucide-react';
 
 const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
@@ -13,6 +13,8 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
   const [loading, setLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
 
   useEffect(() => {
     fetchProfiles();
@@ -33,6 +35,21 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
       await fetchProfiles();
     } catch (err) {
       alert("Status update failed.");
+    } finally {
+      setIsUpdating(null);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+    setIsUpdating(userToDelete.id);
+    try {
+      await db.deleteProfile(userToDelete.id);
+      await fetchProfiles();
+      setShowDeleteConfirm(false);
+      setUserToDelete(null);
+    } catch (err) {
+      alert("Failed to delete user profile.");
     } finally {
       setIsUpdating(null);
     }
@@ -131,6 +148,14 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
                       >
                          {p.status === 'Suspended' ? <CheckCircle2 size={18} /> : <Ban size={18} />}
                       </button>
+                      <button 
+                        onClick={() => { setUserToDelete(p); setShowDeleteConfirm(true); }}
+                        disabled={isUpdating === p.id}
+                        title="Delete User Profile"
+                        className="p-2.5 bg-white border border-red-100 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all shadow-sm"
+                      >
+                         <Trash2 size={18} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -139,6 +164,43 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
           </table>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && userToDelete && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden border border-red-100 animate-in zoom-in-95 duration-200">
+            <div className="p-10 text-center">
+               <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
+                  <AlertTriangle size={40} />
+               </div>
+               <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2">Delete Profile</h3>
+               <p className="text-sm text-gray-500 font-bold mb-8 leading-relaxed px-4">
+                 Are you sure you want to permanently delete the profile for <span className="text-red-600 font-black">"{userToDelete.email}"</span>? This action cannot be undone.
+               </p>
+               
+               <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={handleDeleteUser}
+                    disabled={isUpdating === userToDelete.id}
+                    className="w-full py-5 bg-red-600 text-white font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-red-700 transition-all shadow-xl shadow-red-900/10 flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isUpdating === userToDelete.id ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />} 
+                    Yes, Delete Profile
+                  </button>
+                  <button 
+                    onClick={() => { setShowDeleteConfirm(false); setUserToDelete(null); }}
+                    className="w-full py-5 bg-gray-100 text-gray-600 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-gray-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+               </div>
+            </div>
+            <div className="p-4 bg-gray-50 border-t border-gray-100 text-center">
+               <p className="text-[8px] font-black text-gray-400 uppercase tracking-[0.2em]">Security Protocol v2.5</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

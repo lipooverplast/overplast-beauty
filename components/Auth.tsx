@@ -2,14 +2,23 @@
 import React, { useState } from 'react';
 import { supabase, clearSupabaseConfig, isSupabaseConfigured } from '../supabaseClient';
 import { Mail, Lock, Loader2, Sparkles, ArrowRight, Github, Chrome, AlertCircle, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
+import { APP_LOGO_URL, APP_NAME } from '../constants';
 
 const AuthLogo = () => (
   <div className="flex flex-col items-center gap-2 mb-6">
-    <div className="w-32 h-32 bg-black rounded-[2.5rem] flex items-center justify-center shadow-2xl p-4 mb-4">
-      <img src="/logo.svg" alt="Overplast Beauty" className="w-full h-full object-contain" />
+    <div className="w-32 h-32 bg-white rounded-[2.5rem] flex items-center justify-center shadow-2xl p-4 mb-4 border border-gray-100">
+      <img 
+        src={APP_LOGO_URL} 
+        alt={APP_NAME} 
+        className="w-full h-full object-contain" 
+        referrerPolicy="no-referrer"
+        onError={(e) => {
+          e.currentTarget.src = "https://picsum.photos/seed/overplast/200/200";
+        }}
+      />
     </div>
     <div className="text-center">
-        <h1 className="text-4xl font-black tracking-tighter text-gray-900 leading-none">OVERPLAST</h1>
+        <h1 className="text-4xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST</h1>
         <div className="flex flex-col items-center">
           <p className="font-beauty text-2xl text-gray-800 italic -mt-1">Beauty</p>
           <p className="text-[10px] font-black text-yellow-600 uppercase tracking-[0.2em] mt-1">Cloud Base Management System</p>
@@ -58,6 +67,9 @@ const Auth: React.FC = () => {
     } catch (err: any) {
       console.error("Auth error:", err);
       let msg = err.message || 'An error occurred during authentication.';
+      if (msg === 'Failed to fetch') {
+        msg = "Network Error: Could not connect to the cloud database. Please check your internet connection and verify your Supabase URL in Settings.";
+      }
       if (msg === 'Invalid login credentials') {
         msg = "Invalid email or security key. If you haven't registered yet, please use the Register tab.";
       }

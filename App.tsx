@@ -15,14 +15,17 @@ import Clients from './components/Clients';
 import AdminOffice from './components/AdminOffice';
 import Auth from './components/Auth';
 
+import { APP_LOGO_URL, APP_NAME } from './constants';
+
 const AppLogo = ({ className = "" }: { className?: string }) => (
   <img 
-    src="/logo.svg" 
-    alt="Overplast Beauty" 
-    className={`${className} object-contain brightness-110`} 
+    src={APP_LOGO_URL} 
+    alt={APP_NAME} 
+    className={`${className} object-contain`} 
+    referrerPolicy="no-referrer"
     onError={(e) => {
       // Fallback if logo is missing
-      e.currentTarget.src = "https://picsum.photos/seed/beauty/200/200";
+      e.currentTarget.src = "https://picsum.photos/seed/overplast/200/200";
     }}
   />
 );
@@ -90,17 +93,24 @@ const App: React.FC = () => {
     else setIsLoading(true);
     
     try {
+      const isAdmin = !isSupabaseConfigured || profile?.role === 'Admin';
+      const filterId = isAdmin ? undefined : user?.id;
+
       const [p, c, i] = await Promise.all([
         db.getProducts(),
-        db.getClients(),
-        db.getInvoices()
+        db.getClients(filterId),
+        db.getInvoices(filterId)
       ]);
       setProducts(p || []);
       setClients(c || []);
       setInvoices(i || []);
       setLastSync(new Date().toLocaleTimeString());
+      setDbError(false);
     } catch (err: any) {
       console.error("Bulk Refresh Error:", err);
+      if (err.message === 'Failed to fetch') {
+        setDbError(true);
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -147,36 +157,52 @@ const App: React.FC = () => {
              <div className="flex items-start gap-6">
                <div className="p-4 bg-red-600 text-white rounded-2xl shadow-lg"><DatabaseZap size={32} /></div>
                <div className="flex-1">
-                 <h3 className="text-2xl font-black text-red-900 uppercase tracking-tighter mb-2">Supabase Connectivity Interrupted</h3>
-                 <p className="text-red-700 font-bold mb-4 leading-relaxed">The system is receiving a 500/Read error from your database. This usually means Row Level Security (RLS) is blocking the app from seeing your profile.</p>
-                 <div className="bg-white p-4 rounded-xl border border-red-200 text-xs font-mono mb-4 text-red-900 break-all select-all">
-                   ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+                 <h3 className="text-2xl font-black text-red-900 uppercase tracking-tighter mb-2">Cloud Connectivity Interrupted</h3>
+                 <p className="text-red-700 font-bold mb-4 leading-relaxed">The system could not reach your cloud database. This usually happens if your Supabase URL/Key is incorrect, your internet is disconnected, or Row Level Security (RLS) is blocking access.</p>
+                 <div className="space-y-4">
+                   <div className="bg-white p-4 rounded-xl border border-red-200">
+                     <p className="text-[10px] font-black uppercase text-gray-400 mb-2">Troubleshooting Step 1: Check RLS</p>
+                     <p className="text-xs text-red-900 mb-2">Run this in Supabase SQL Editor:</p>
+                     <div className="bg-gray-900 p-3 rounded-lg text-[10px] font-mono text-green-400 break-all select-all">
+                       ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+                     </div>
+                   </div>
+                   <div className="bg-white p-4 rounded-xl border border-red-200">
+                     <p className="text-[10px] font-black uppercase text-gray-400 mb-2">Troubleshooting Step 2: Check Config</p>
+                     <p className="text-xs text-red-900">Ensure your <span className="font-bold">VITE_SUPABASE_URL</span> and <span className="font-bold">VITE_SUPABASE_ANON_KEY</span> are correctly set in your environment variables.</p>
+                   </div>
                  </div>
-                 <p className="text-red-800 text-[10px] font-black uppercase tracking-widest">Run the above in Supabase SQL Editor, then click refresh in side navigation.</p>
+                 <p className="text-red-800 text-[10px] font-black uppercase tracking-widest mt-6">Click the refresh icon in the sidebar after fixing.</p>
                </div>
              </div>
           </div>
         )}
-        <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} onNavigate={setActiveView} />
+        <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />
       </div>
     ),
     inventory: <Inventory products={products} onUpdate={refreshData} role={effectiveRole} />,
     invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
     recurring: <RecurringInvoices products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} />,
     clients: <Clients clients={clients} invoices={invoices} onUpdate={refreshData} onCreateInvoice={handleCreateInvoiceForClient} role={effectiveRole} />,
-    'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} onNavigate={setActiveView} />,
-    users: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} onNavigate={setActiveView} />,
-    settings: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} onNavigate={setActiveView} />,
+    'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
+    users: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
+    settings: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
   }[activeView];
 
   return (
-    <div className="min-h-screen flex bg-gray-50 text-gray-900 overflow-hidden">
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 transform transition-transform duration-300 lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+    <div className="h-screen flex bg-gray-50 text-gray-900 overflow-hidden relative">
+      {/* Luxury Background Elements for the entire app */}
+      <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-50/10 via-transparent to-transparent pointer-events-none"></div>
+      <div className="absolute -top-48 -left-48 w-96 h-96 bg-yellow-100 rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
+      <div className="absolute -bottom-48 -right-48 w-96 h-96 bg-gray-200 rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-50/5 rounded-full blur-[160px] pointer-events-none"></div>
+
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 transform transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-full flex flex-col p-6 overflow-y-auto">
           <div className="flex items-center justify-between mb-10 px-2">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-black text-white rounded-xl flex items-center justify-center shadow-lg overflow-hidden">
-                <AppLogo className="w-10 h-10 scale-125" />
+              <div className="w-12 h-12 bg-white text-white rounded-xl flex items-center justify-center shadow-lg overflow-hidden border border-gray-100">
+                <AppLogo className="w-10 h-10" />
               </div>
               <div>
                 <h1 className="text-lg font-black tracking-tighter uppercase leading-none">Overplast</h1>
@@ -248,7 +274,7 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      <main className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarOpen ? 'lg:ml-72' : 'ml-0'}`}>
+      <main className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarOpen ? 'md:ml-72' : 'ml-0'}`}>
         <header className="h-20 bg-white/90 backdrop-blur-xl border-b border-gray-200 flex items-center justify-between px-6 sticky top-0 z-40 shadow-sm">
           <div className="flex items-center gap-4">
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2.5 bg-gray-50 text-gray-400 border border-gray-200 rounded-xl hover:text-black hover:border-black transition-all"><PanelLeft size={20} /></button>
@@ -256,6 +282,14 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            <button 
+              onClick={() => refreshData(true)}
+              disabled={isRefreshing}
+              className="p-2.5 bg-gray-50 text-gray-400 border border-gray-200 rounded-xl hover:text-black hover:border-black transition-all disabled:opacity-50"
+              title="Refresh Data"
+            >
+              <RefreshCw size={20} className={isRefreshing ? 'animate-spin' : ''} />
+            </button>
             <div className="flex items-center gap-3">
                <div className="text-right hidden md:block">
                  <p className="text-[10px] font-black text-gray-900 uppercase leading-none truncate max-w-[120px] mb-0.5">{user?.email?.split('@')[0]}</p>
@@ -268,8 +302,10 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="p-6 md:p-10 max-w-[1600px] w-full mx-auto overflow-y-auto">
-          {ActiveComponent}
+        <div className="p-6 md:p-10 w-full flex-1 overflow-y-auto relative z-10">
+          <div className="w-full max-w-[1600px] mx-auto">
+            {ActiveComponent}
+          </div>
         </div>
       </main>
     </div>

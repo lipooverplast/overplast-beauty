@@ -10,16 +10,31 @@ import { Invoice, Product, Client, InvoiceItem, UserRole, Payment } from '../typ
 import { db } from '../db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { APP_LOGO_URL, APP_NAME } from '../constants';
+import { geminiService } from '../geminiService';
 
 const InvoiceLogo = () => (
   <div className="flex items-center gap-4">
-    <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center p-2 shadow-lg">
-      <img src="/logo.svg" alt="Overplast Beauty" className="w-full h-full object-contain" />
+    <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center p-2 shadow-lg border border-gray-100">
+      <img 
+        src={APP_LOGO_URL} 
+        alt={APP_NAME} 
+        className="w-full h-full object-contain" 
+        referrerPolicy="no-referrer"
+        onError={(e) => {
+          e.currentTarget.src = "https://picsum.photos/seed/overplast/200/200";
+        }}
+      />
     </div>
     <div className="flex flex-col">
         <h1 className="text-3xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST</h1>
         <p className="font-beauty text-xl text-gray-800 italic -mt-1 leading-none">Beauty</p>
         <p className="text-[7px] font-black text-yellow-600 uppercase tracking-widest mt-1">Cloud Base Management System</p>
+        <div className="mt-2 space-y-0.5 border-t border-gray-100 pt-1">
+          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
+          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">Ph: +92 301 844 4449 | +92 332 977 9945</p>
+          <p className="text-[7px] font-bold text-gray-400 lowercase tracking-tight">Email: care@overplast.org</p>
+        </div>
     </div>
   </div>
 );
@@ -37,10 +52,12 @@ interface InvoicesProps {
 const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpdate, role, initialClientId, onClearInitialClient }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isParsingInvoice, setIsParsingInvoice] = useState(false);
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [selectedItems, setSelectedItems] = useState<InvoiceItem[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [taxRate, setTaxRate] = useState(0);
+  const [discountRate, setDiscountRate] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit'>('Cash');
   const [activeAssetId, setActiveAssetId] = useState(''); 
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -76,8 +93,9 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
   const calculateSubtotal = () => selectedItems.reduce((sum, item) => sum + item.total, 0);
   const subtotal = calculateSubtotal();
-  const taxTotal = subtotal * (taxRate / 100);
-  const grandTotal = subtotal + taxTotal;
+  const discountTotal = subtotal * (discountRate / 100);
+  const taxTotal = (subtotal - discountTotal) * (taxRate / 100);
+  const grandTotal = subtotal - discountTotal + taxTotal;
 
   const addItem = (productId: string) => {
     const product = products.find(p => p.id === productId);
@@ -116,6 +134,56 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     }));
   };
 
+  const handleAIParse = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsParsingInvoice(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const base64 = event.target?.result as string;
+        const base64Data = base64.split(',')[1];
+        const mimeType = file.type;
+
+        const parsedData = await geminiService.parseInvoiceImage(base64Data, mimeType);
+        
+        if (parsedData.clientName) {
+          const client = clients.find(c => c.name.toLowerCase().includes(parsedData.clientName!.toLowerCase()));
+          if (client) setSelectedClientId(client.id);
+        }
+
+        if (parsedData.items && parsedData.items.length > 0) {
+          const newItems: InvoiceItem[] = [];
+          for (const item of parsedData.items) {
+            const product = products.find(p => p.name.toLowerCase().includes(item.name.toLowerCase()));
+            if (product) {
+              const discount = calcDiscount(product.mrp, product.tp);
+              newItems.push({
+                productId: product.id,
+                name: product.name,
+                quantity: item.quantity || 1,
+                price: product.tp,
+                mrp: product.mrp,
+                tp: product.tp,
+                discount: discount,
+                total: product.tp * (item.quantity || 1)
+              });
+            }
+          }
+          setSelectedItems(prev => [...prev, ...newItems]);
+        }
+        
+        setIsParsingInvoice(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error("AI Parse Error:", err);
+      alert("AI Parse Failed: " + (err.message || "Unknown error"));
+      setIsParsingInvoice(false);
+    }
+  };
+
   const handleCreateInvoice = async () => {
     const client = clients.find(c => c.id === selectedClientId);
     if (!client) { alert("Please select a client."); return; }
@@ -130,6 +198,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       date: new Date().toISOString().split('T')[0],
       items: selectedItems,
       subtotal,
+      discountRate,
+      discountTotal,
       taxRate,
       taxTotal,
       total: grandTotal,
@@ -360,8 +430,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       </div>
                     </td>
                     <td className="px-6 py-5 text-right font-black text-gray-900">Rs. {(inv.total || 0).toLocaleString()}</td>
-                    <td className="px-6 py-5 text-right font-bold text-green-600">Rs. {paid.toLocaleString()}</td>
-                    <td className="px-6 py-5 text-right font-bold text-red-600">Rs. {balance.toLocaleString()}</td>
+                    <td className="px-6 py-5 text-right font-bold text-green-600">Rs. {(paid || 0).toLocaleString()}</td>
+                    <td className="px-6 py-5 text-right font-bold text-red-600">Rs. {(balance || 0).toLocaleString()}</td>
                     <td className="px-6 py-5 text-center">
                       <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${inv.status === 'Paid' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{inv.status}</span>
                     </td>
@@ -462,7 +532,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 <button onClick={() => setPaymentMethod('Cash')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'Cash' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Cash</button>
                 <button onClick={() => setPaymentMethod('Credit')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'Credit' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>Credit</button>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-red-50 text-red-600 rounded-2xl"><X size={28} /></button>
+              <div className="flex items-center gap-3">
+                <label className={`flex items-center gap-3 px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase cursor-pointer hover:bg-indigo-700 shadow-lg transition-all ${isParsingInvoice ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                  {isParsingInvoice ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  {isParsingInvoice ? 'AI Parsing...' : 'AI Scan Invoice'}
+                  <input type="file" accept="image/*" onChange={handleAIParse} className="hidden" disabled={isParsingInvoice} />
+                </label>
+                <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-red-50 text-red-600 rounded-2xl"><X size={28} /></button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-10 space-y-10">
@@ -490,6 +567,10 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   </select>
                 </div>
                 <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Discount (%)</label>
+                  <input type="number" value={discountRate} onChange={e => setDiscountRate(parseFloat(e.target.value) || 0)} className="w-full p-5 bg-red-50 border border-red-100 rounded-[1.25rem] font-black outline-none text-center text-red-600" />
+                </div>
+                <div>
                   <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Tax (%)</label>
                   <input type="number" value={taxRate} onChange={e => setTaxRate(parseFloat(e.target.value) || 0)} className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-black outline-none text-center" />
                 </div>
@@ -501,7 +582,6 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     <tr>
                       <th className="px-8 py-6">Asset Description</th>
                       <th className="px-6 py-6 text-center">MRP</th>
-                      <th className="px-6 py-6 text-center">Disc %</th>
                       <th className="px-6 py-6 text-center">Trade Price</th>
                       <th className="px-6 py-6 text-center">Qty</th>
                       <th className="px-8 py-6 text-right">Line Total</th>
@@ -517,13 +597,12 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         </td>
                         <td className="px-6 py-5 text-center text-xs font-bold text-gray-400 line-through">Rs. {item.mrp}</td>
                         <td className="px-6 py-5 text-center">
-                           <span className="bg-red-50 text-red-600 px-3 py-1 rounded-lg text-[10px] font-black">-{item.discount}%</span>
+                          <input type="number" value={item.tp} onChange={e => updateItem(item.productId, { tp: parseFloat(e.target.value) || 0 })} className="w-24 bg-yellow-50 border border-yellow-100 rounded-xl p-2.5 text-center font-black outline-none text-yellow-700" />
                         </td>
-                        <td className="px-6 py-5 text-center font-black text-yellow-700">Rs. {item.tp}</td>
                         <td className="px-6 py-5 text-center">
                           <input type="number" min="1" value={item.quantity} onChange={e => updateItem(item.productId, { quantity: parseInt(e.target.value) || 1 })} className="w-16 bg-gray-100 border-none rounded-xl p-2.5 text-center font-black outline-none" />
                         </td>
-                        <td className="px-8 py-5 text-right font-black text-gray-900">Rs. {item.total.toLocaleString()}</td>
+                        <td className="px-8 py-5 text-right font-black text-gray-900">Rs. {(item.total || 0).toLocaleString()}</td>
                         <td className="px-6 py-5 text-right">
                           <button onClick={() => setSelectedItems(selectedItems.filter(i => i.productId !== item.productId))} className="p-2 text-red-300 hover:text-red-600 transition-colors"><Trash2 size={18} /></button>
                         </td>
@@ -539,19 +618,23 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
               </div>
             </div>
 
-            <div className="p-10 border-t bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-8">
-              <div className="grid grid-cols-3 gap-16">
+             <div className="p-10 border-t bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-8">
+              <div className="grid grid-cols-4 gap-12">
                 <div>
                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Subtotal</p>
-                   <p className="text-xl font-black text-gray-900">Rs. {subtotal.toLocaleString()}</p>
+                   <p className="text-xl font-black text-gray-900">Rs. {(subtotal || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                   <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Discount ({discountRate}%)</p>
+                   <p className="text-xl font-black text-red-600">Rs. {(discountTotal || 0).toLocaleString()}</p>
                 </div>
                 <div>
                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tax ({taxRate}%)</p>
-                   <p className="text-xl font-black text-yellow-600">Rs. {taxTotal.toLocaleString()}</p>
+                   <p className="text-xl font-black text-yellow-600">Rs. {(taxTotal || 0).toLocaleString()}</p>
                 </div>
                 <div>
                    <p className="text-[10px] font-black text-yellow-600 uppercase tracking-widest mb-1">Final Amount</p>
-                   <p className="text-4xl font-black text-black tracking-tighter">Rs. {grandTotal.toLocaleString()}</p>
+                   <p className="text-4xl font-black text-black tracking-tighter">Rs. {(grandTotal || 0).toLocaleString()}</p>
                 </div>
               </div>
               <button 
@@ -662,8 +745,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <th className="py-6 text-left text-[11px] font-black uppercase tracking-widest">Item Description</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">MRP</th>
-                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Tp Per Unit</th>
-                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Discount</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Trade Price</th>
                       <th className="py-6 text-right text-[11px] font-black uppercase tracking-widest">Total</th>
                     </tr>
                   </thead>
@@ -676,33 +758,32 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         <td className="py-6 text-center font-black text-gray-900">{item.quantity}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.mrp}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.tp}</td>
-                        <td className="py-6 text-center">
-                          <span className="font-black text-[10px] text-red-600">-{item.discount}%</span>
-                        </td>
-                        <td className="py-6 text-right font-black text-gray-900">Rs. {item.total.toLocaleString()}</td>
+                        <td className="py-6 text-right font-black text-gray-900">Rs. {(item.total || 0).toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-4 border-black">
-                      <td colSpan={4}></td>
+                      <td colSpan={3}></td>
                       <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Subtotal</td>
-                      <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {viewingInvoice.subtotal.toLocaleString()}</td>
+                      <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {(viewingInvoice.subtotal || 0).toLocaleString()}</td>
                     </tr>
+                    {viewingInvoice.discountTotal > 0 && (
+                      <tr>
+                        <td colSpan={3}></td>
+                        <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Discount ({viewingInvoice.discountRate}%)</td>
+                        <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingInvoice.discountTotal || 0).toLocaleString()}</td>
+                      </tr>
+                    )}
                     <tr>
-                      <td colSpan={4}></td>
-                      <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Total Savings</td>
-                      <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {totalSavings.toLocaleString()}</td>
-                    </tr>
-                    <tr>
-                      <td colSpan={4}></td>
+                      <td colSpan={3}></td>
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingInvoice.taxRate}%)</td>
-                      <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {viewingInvoice.taxTotal.toLocaleString()}</td>
+                      <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingInvoice.taxTotal || 0).toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td colSpan={4}></td>
+                      <td colSpan={3}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
-                      <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {viewingInvoice.total.toLocaleString()}</td>
+                      <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {(viewingInvoice.total || 0).toLocaleString()}</td>
                     </tr>
                     {(viewingInvoice.paidAmount && viewingInvoice.paidAmount > 0) || viewingInvoice.paymentMethod === 'Cash' ? (
                       <>

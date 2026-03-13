@@ -6,7 +6,7 @@ import {
   Sparkles, Upload, ArrowRight, Wallet, Banknote, 
   CreditCard, ChevronDown, Percent, Info, Shield, MapPin, Phone, AlertTriangle
 } from 'lucide-react';
-import { Invoice, Product, Client, InvoiceItem, UserRole, Payment } from '../types';
+import { Invoice, Product, Client, InvoiceItem, UserRole, Payment, StockTransaction } from '../types';
 import { db } from '../db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -45,11 +45,12 @@ interface InvoicesProps {
   clients: Client[];
   onUpdate: () => void;
   role: UserRole;
+  userId?: string;
   initialClientId?: string | null;
   onClearInitialClient?: () => void;
 }
 
-const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpdate, role, initialClientId, onClearInitialClient }) => {
+const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpdate, role, userId, initialClientId, onClearInitialClient }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isParsingInvoice, setIsParsingInvoice] = useState(false);
@@ -205,7 +206,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       total: grandTotal,
       status: paymentMethod === 'Cash' ? 'Paid' : 'Pending',
       paymentMethod: paymentMethod,
-      paidAmount: paymentMethod === 'Cash' ? grandTotal : 0
+      paidAmount: paymentMethod === 'Cash' ? grandTotal : 0,
+      createdBy: userId,
     };
 
     try {
@@ -220,6 +222,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
       if (updatedProductEntries.length > 0) {
         await db.saveProducts(updatedProductEntries);
+        
+        // Create stock transactions for the activity log
+        const transactions: StockTransaction[] = selectedItems.map(item => ({
+          id: `tx-out-${Date.now()}-${item.productId}`,
+          productId: item.productId,
+          productName: item.name,
+          type: 'OUT',
+          quantity: item.quantity,
+          date: new Date().toISOString().split('T')[0],
+          note: `Invoice #${newInvoice.invoiceNumber}`,
+          createdBy: userId,
+        }));
+        await db.saveStockTransactions(transactions);
       }
       
       onUpdate();
@@ -273,7 +288,9 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
   const fetchPayments = async (invoiceId: string) => {
     try {
-      const data = await db.getPayments(invoiceId);
+      const isAdmin = role === 'Admin';
+      const filterId = isAdmin ? undefined : userId;
+      const data = await db.getPayments(invoiceId, filterId);
       setPayments(data);
     } catch (err) {
       console.error("Error fetching payments:", err);
@@ -294,7 +311,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       invoiceId: viewingInvoice.id,
       amount: paymentAmount,
       date: new Date().toISOString().split('T')[0],
-      note: paymentNote
+      note: paymentNote,
+      createdBy: userId,
     };
 
     try {

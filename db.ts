@@ -111,8 +111,21 @@ export const db = {
   getProducts: async (userId?: string): Promise<Product[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
+        // Fetch admin IDs to include their products for everyone
+        const { data: adminProfiles } = await supabase
+          .from('profiles')
+          .select('id')
+          .or('role.eq.Admin,role.eq.admin');
+        const adminIds = (adminProfiles || []).map(p => p.id);
+
         let query = supabase.from('products').select('*').order('name');
-        if (userId) query = query.eq('user_id', userId);
+        
+        if (userId) {
+          // If userId is provided (Staff mode), show their own products OR admin products
+          const allowedIds = [userId, ...adminIds];
+          query = query.in('user_id', allowedIds);
+        }
+        
         const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(p => ({
@@ -126,10 +139,19 @@ export const db = {
           createdAt: p.created_at
         }));
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error("Error fetching products:", err);
+    }
     const data = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     const products = data ? JSON.parse(data) : [];
-    if (userId) return products.filter((p: any) => p.userId === userId);
+    
+    if (userId) {
+      // For local storage, we don't easily know who the admin is, 
+      // but we can assume products with no createdBy or specific admin email are shared
+      // For simplicity in local mode, we'll just show all products if it's a small shop
+      // or filter by userId. But the user wants admin products shared.
+      return products.filter((p: any) => p.createdBy === userId || !p.createdBy);
+    }
     return products;
   },
 
@@ -154,10 +176,8 @@ export const db = {
           price: p.tp, cost: p.purchasePrice, mrp: p.mrp, tp: p.tp, stock: p.stock,
           min_stock: p.minStock, description: p.description
         };
-        if (userId) {
-          row.user_id = userId;
-          row.user_email = userEmail;
-        }
+        row.user_id = p.createdBy || userId;
+        row.user_email = p.createdByName || userEmail;
         return row;
       });
       const { error } = await withRetry(() => supabase.from('products').upsert(dbRows));
@@ -228,8 +248,8 @@ export const db = {
           doctor_phone: c.doctorPhone || ''
         };
         if (userId) {
-          row.user_id = userId;
-          row.user_email = userEmail;
+          row.user_id = c.createdBy || userId;
+          row.user_email = c.createdByName || userEmail;
         }
         return row;
       });
@@ -303,8 +323,8 @@ export const db = {
       const dbRows = processedInvoices.map(inv => {
         const row: any = {
           id: inv.id,
-          user_id: userId,
-          user_email: userEmail,
+          user_id: inv.createdBy || userId,
+          user_email: inv.createdByName || userEmail,
           invoice_number: inv.invoiceNumber, client_id: inv.clientId, client_name: inv.clientName,
           date: inv.date, items: inv.items, subtotal: inv.subtotal, 
           discount_rate: inv.discountRate || 0,
@@ -389,8 +409,8 @@ export const db = {
       const dbRows = processedRecurring.map(ri => {
         const row: any = {
           id: ri.id,
-          user_id: userId,
-          user_email: userEmail,
+          user_id: ri.createdBy || userId,
+          user_email: ri.createdByName || userEmail,
           client_id: ri.clientId, 
           client_name: ri.clientName, 
           items: ri.items,
@@ -508,8 +528,20 @@ export const db = {
   getStockTransactions: async (userId?: string): Promise<StockTransaction[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
+        // Fetch admin IDs to include their transactions for everyone
+        const { data: adminProfiles } = await supabase
+          .from('profiles')
+          .select('id')
+          .or('role.eq.Admin,role.eq.admin');
+        const adminIds = (adminProfiles || []).map(p => p.id);
+
         let query = supabase.from('stock_transactions').select('*').order('date', { ascending: false });
-        if (userId) query = query.eq('user_id', userId);
+        
+        if (userId) {
+          const allowedIds = [userId, ...adminIds];
+          query = query.in('user_id', allowedIds);
+        }
+        
         const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(t => ({
@@ -520,10 +552,12 @@ export const db = {
           createdAt: t.created_at
         }));
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error("Error fetching transactions:", err);
+    }
     const data = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
     const transactions = data ? JSON.parse(data) : [];
-    if (userId) return transactions.filter((t: any) => t.createdBy === userId);
+    if (userId) return transactions.filter((t: any) => t.createdBy === userId || !t.createdBy);
     return transactions;
   },
 
@@ -534,8 +568,8 @@ export const db = {
       const userEmail = session?.user?.email;
       const dbRows = transactions.map(t => {
         const row: any = {
-          user_id: userId, 
-          user_email: userEmail,
+          user_id: t.createdBy || userId, 
+          user_email: t.createdByName || userEmail,
           product_id: t.productId, product_name: t.productName,
           type: t.type, quantity: t.quantity, date: t.date, note: t.note
         };
@@ -545,7 +579,11 @@ export const db = {
       const { error } = await withRetry(() => supabase.from('stock_transactions').upsert(dbRows));
       if (error) throw new Error(error.message);
     }
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    
+    const localData = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+    const existing = localData ? JSON.parse(localData) : [];
+    const updated = [...existing, ...transactions];
+    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
   },
 
   updateUserStatus: async (id: string, status: UserStatus) => {
@@ -562,33 +600,42 @@ export const db = {
     }
   },
 
-  getPayments: async (invoiceId?: string): Promise<Payment[]> => {
+  getPayments: async (invoiceId?: string, userId?: string): Promise<Payment[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
         let query = supabase.from('payments').select('*').order('date', { ascending: false });
         if (invoiceId) query = query.eq('invoice_id', invoiceId);
+        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await withRetry(() => query);
         if (error) throw error;
         return (data || []).map(p => ({
           id: p.id, invoiceId: p.invoice_id, amount: Number(p.amount),
-          date: p.date, note: p.note
+          date: p.date, note: p.note,
+          createdBy: p.user_id,
+          createdByName: p.user_email
         }));
       }
     } catch (err) {}
     const data = localStorage.getItem(STORAGE_KEYS.PAYMENTS);
     const payments = data ? JSON.parse(data) : [];
-    if (invoiceId) return payments.filter((p: any) => p.invoiceId === invoiceId);
-    return payments;
+    let filtered = payments;
+    if (invoiceId) filtered = filtered.filter((p: any) => p.invoiceId === invoiceId);
+    if (userId) filtered = filtered.filter((p: any) => p.createdBy === userId);
+    return filtered;
   },
 
   savePayment: async (payment: Payment) => {
     if (!isValidUUID(payment.id)) payment.id = generateUUID();
 
     if (isSupabaseConfigured && supabase) {
-      const userId = await getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      const userEmail = session?.user?.email;
+      
       const row = {
         id: payment.id,
-        user_id: userId,
+        user_id: payment.createdBy || userId,
+        user_email: payment.createdByName || userEmail,
         invoice_id: payment.invoiceId,
         amount: payment.amount,
         date: payment.date,
@@ -600,18 +647,20 @@ export const db = {
 
     const localData = localStorage.getItem(STORAGE_KEYS.PAYMENTS);
     const existing = localData ? JSON.parse(localData) : [];
-    existing.push(payment);
+    const idx = existing.findIndex((p: any) => p.id === payment.id);
+    if (idx > -1) existing[idx] = payment;
+    else existing.push(payment);
     localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(existing));
   },
 
-  exportDatabase: async () => {
-    const [p, c, i] = await Promise.all([db.getProducts(), db.getClients(), db.getInvoices()]);
+  exportDatabase: async (userId?: string) => {
+    const [p, c, i] = await Promise.all([db.getProducts(userId), db.getClients(userId), db.getInvoices(userId)]);
     const data = { products: p, clients: c, invoices: i };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `overplast_backup.json`;
+    link.download = `overplast_backup_${userId || 'admin'}.json`;
     link.click();
   }
 };

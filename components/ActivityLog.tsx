@@ -1,12 +1,15 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../db';
-import { StockTransaction, Invoice, Client, Product, Profile } from '../types';
+import { StockTransaction, Invoice, Client, Product, Profile, UserRole } from '../types';
 import { 
   Loader2, Activity, Search, Filter, Calendar, 
   User, Package, FileText, Users, ArrowRight,
-  Clock, CheckCircle2, AlertCircle, RefreshCw
+  Clock, CheckCircle2, AlertCircle, RefreshCw,
+  Printer, Download, FileDown, ChevronDown
 } from 'lucide-react';
+// import { jsPDF } from 'jspdf';
+// import html2canvas from 'html2canvas';
+import { APP_LOGO_URL, APP_NAME } from '../constants';
 
 interface ActivityItem {
   id: string;
@@ -24,28 +27,40 @@ interface ActivityLogProps {
   clients?: Client[];
   products?: Product[];
   onRefresh?: () => void;
+  userId?: string;
+  role?: UserRole;
 }
 
-const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clients: propClients, products: propProducts, onRefresh }) => {
+const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clients: propClients, products: propProducts, onRefresh, userId, role }) => {
   const [loading, setLoading] = useState(!propInvoices);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [selectedUser, setSelectedUser] = useState<string>('all');
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [selectedDate, setSelectedDate] = useState<string>(''); // YYYY-MM-DD
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   useEffect(() => {
     fetchActivities();
+    
+    // Auto-refresh every 60 seconds for live updates in the admin panel
+    const interval = setInterval(fetchActivities, 60000);
+    return () => clearInterval(interval);
   }, [propInvoices, propClients, propProducts]);
 
   const fetchActivities = async () => {
-    if (!propInvoices) setLoading(true);
+    // If we're not an admin, we should only see our own activities
+    const filterId = role === 'Admin' ? undefined : userId;
+    
+    // We'll fetch from DB to ensure we have the most complete and up-to-date activity list
     try {
       const [transactions, invoices, clients, products, userProfiles] = await Promise.all([
-        db.getStockTransactions(),
-        propInvoices ? Promise.resolve(propInvoices) : db.getInvoices(),
-        propClients ? Promise.resolve(propClients) : db.getClients(),
-        propProducts ? Promise.resolve(propProducts) : db.getProducts(),
+        db.getStockTransactions(filterId),
+        db.getInvoices(filterId),
+        db.getClients(filterId),
+        db.getProducts(filterId),
         db.getAllProfiles()
       ]);
 
@@ -53,12 +68,12 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
 
       const allActivities: ActivityItem[] = [];
 
-      // Process Transactions
+      // Process Transactions (Stock movements)
       transactions.forEach(t => {
         allActivities.push({
           id: t.id,
           type: 'transaction',
-          action: t.type === 'IN' ? 'Stock Added' : 'Stock Removed',
+          action: t.type === 'IN' ? 'Stock Added' : (t.type === 'RETURN' ? 'Stock Returned' : 'Stock Removed'),
           user: t.createdBy || 'Unknown',
           userName: t.createdByName || 'Unknown User',
           timestamp: t.createdAt || t.date,
@@ -90,7 +105,7 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
           user: c.createdBy || 'Unknown',
           userName: c.createdByName || 'Unknown User',
           timestamp: c.createdAt || new Date().toISOString(),
-          details: `Client: ${c.name} (${c.hospitalName})`,
+          details: `Client: ${c.name} (${c.hospitalName || 'No Hospital'})`,
           metadata: c
         });
       });
@@ -109,8 +124,18 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
         });
       });
 
-      // Sort by timestamp descending
-      allActivities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      // Sort by timestamp descending (most recent first)
+      allActivities.sort((a, b) => {
+        const timeA = new Date(a.timestamp).getTime();
+        const timeB = new Date(b.timestamp).getTime();
+        
+        if (isNaN(timeA) && isNaN(timeB)) return 0;
+        if (isNaN(timeA)) return 1;
+        if (isNaN(timeB)) return -1;
+        
+        return timeB - timeA;
+      });
+      
       setActivities(allActivities);
     } catch (err) {
       console.error("Failed to fetch activities", err);
@@ -128,10 +153,78 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
       
       const matchesType = filterType === 'all' || a.type === filterType;
       const matchesUser = selectedUser === 'all' || a.user === selectedUser;
+      
+      const activityDate = a.timestamp?.includes('T') ? a.timestamp.split('T')[0] : (a.timestamp || '');
+      const matchesMonth = !selectedMonth || activityDate.startsWith(selectedMonth);
+      const matchesDate = !selectedDate || activityDate === selectedDate;
 
-      return matchesSearch && matchesType && matchesUser;
+      return matchesSearch && matchesType && matchesUser && matchesMonth && matchesDate;
     });
-  }, [activities, searchTerm, filterType, selectedUser]);
+  }, [activities, searchTerm, filterType, selectedUser, selectedMonth, selectedDate]);
+
+  const exportToPdf = async () => {
+    alert("PDF functionality temporarily disabled for debugging.");
+    /*
+    setIsGeneratingPdf(true);
+    const element = document.getElementById('activity-report-area');
+    if (!element) return;
+    
+    try {
+      // Temporarily show the hidden report area
+      element.classList.remove('hidden');
+      
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = pdfWidth / imgWidth;
+      const canvasHeightInPdf = imgHeight * ratio;
+      
+      let heightLeft = canvasHeightInPdf;
+      let position = 0;
+      
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, canvasHeightInPdf);
+      heightLeft -= pdfHeight;
+      
+      while (heightLeft > 0) {
+        position = heightLeft - canvasHeightInPdf;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, canvasHeightInPdf);
+        heightLeft -= pdfHeight;
+      }
+      
+      pdf.save(`Activity_Log_${selectedMonth || 'All'}.pdf`);
+      element.classList.add('hidden');
+    } catch (err) {
+      console.error("PDF Generation Error:", err);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+    */
+  };
+
+  const handlePrint = () => {
+    alert("Print functionality temporarily disabled for debugging.");
+    /*
+    const printContent = document.getElementById('activity-report-area');
+    if (!printContent) return;
+    
+    const originalDisplay = printContent.style.display;
+    printContent.style.display = 'block';
+    
+    window.print();
+    
+    printContent.style.display = originalDisplay;
+    */
+  };
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -165,7 +258,7 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
   return (
     <div className="space-y-8">
       <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row gap-4">
+        <div className="flex flex-col xl:flex-row gap-6">
           <div className="relative flex-1">
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
@@ -177,7 +270,27 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
             />
           </div>
           
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-2xl border border-gray-100">
+              <Calendar size={16} className="text-gray-400" />
+              <input 
+                type="month" 
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="bg-transparent border-none font-black text-[10px] uppercase tracking-widest outline-none focus:ring-0"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-2xl border border-gray-100">
+              <Calendar size={16} className="text-gray-400" />
+              <input 
+                type="date" 
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="bg-transparent border-none font-black text-[10px] uppercase tracking-widest outline-none focus:ring-0"
+              />
+            </div>
+
             <select 
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
@@ -201,15 +314,33 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
               ))}
             </select>
 
-            <button 
-              onClick={() => {
-                if (onRefresh) onRefresh();
-                fetchActivities();
-              }} 
-              className="p-4 bg-black text-white rounded-2xl hover:bg-gray-900 transition-all shadow-lg"
-            >
-              <RefreshCw size={20} />
-            </button>
+            <div className="flex gap-2">
+              <button 
+                onClick={handlePrint}
+                className="p-4 bg-white border border-gray-200 text-gray-600 rounded-2xl hover:bg-gray-50 transition-all shadow-sm"
+                title="Print Log"
+              >
+                <Printer size={20} />
+              </button>
+              <button 
+                onClick={exportToPdf}
+                disabled={isGeneratingPdf}
+                className="p-4 bg-black text-white rounded-2xl hover:bg-gray-900 transition-all shadow-lg disabled:opacity-50"
+                title="Export PDF"
+              >
+                {isGeneratingPdf ? <Loader2 size={20} className="animate-spin" /> : <FileDown size={20} />}
+              </button>
+              <button 
+                onClick={() => {
+                  if (onRefresh) onRefresh();
+                  fetchActivities();
+                }} 
+                className="p-4 bg-yellow-500 text-black rounded-2xl hover:bg-yellow-600 transition-all shadow-lg"
+                title="Refresh"
+              >
+                <RefreshCw size={20} />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -251,6 +382,51 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
             <p className="font-black uppercase tracking-widest">No matching activities found</p>
           </div>
         )}
+      </div>
+
+      {/* Hidden Report Area for PDF/Print */}
+      <div id="activity-report-area" className="hidden p-16 bg-white">
+        <div className="flex justify-between items-start mb-12">
+          <div className="flex items-center gap-4">
+            <img src={APP_LOGO_URL} alt={APP_NAME} className="w-16 h-16 object-contain" referrerPolicy="no-referrer" />
+            <div>
+              <h1 className="text-2xl font-black uppercase tracking-tighter">Activity Audit Log</h1>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{APP_NAME} - Executive Office</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Report Period</p>
+            <p className="text-sm font-black text-gray-900 uppercase">{selectedMonth || 'All Time'} {selectedDate && `| ${selectedDate}`}</p>
+          </div>
+        </div>
+
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-gray-900 text-white">
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest">Timestamp</th>
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest">Action</th>
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest">User</th>
+              <th className="p-4 text-[10px] font-black uppercase tracking-widest">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filteredActivities.map((a, i) => (
+              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                <td className="p-4 text-[10px] font-bold text-gray-600">
+                  {new Date(a.timestamp).toLocaleString()}
+                </td>
+                <td className="p-4 text-[10px] font-black uppercase text-gray-900">{a.action}</td>
+                <td className="p-4 text-[10px] font-bold text-gray-600">{a.userName}</td>
+                <td className="p-4 text-xs font-black text-gray-900">{a.details}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        
+        <div className="mt-12 pt-8 border-t border-gray-100 flex justify-between items-center">
+          <p className="text-[8px] font-black text-gray-400 uppercase tracking-[0.3em]">Generated on {new Date().toLocaleString()}</p>
+          <p className="text-[8px] font-black text-gray-400 uppercase tracking-[0.3em]">Confidential - Internal Use Only</p>
+        </div>
       </div>
     </div>
   );

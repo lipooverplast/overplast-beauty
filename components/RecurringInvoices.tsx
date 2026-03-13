@@ -42,9 +42,10 @@ interface RecurringInvoicesProps {
   clients: Client[];
   onUpdate: () => void;
   role: UserRole;
+  userId?: string;
 }
 
-const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients, onUpdate, role }) => {
+const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients, onUpdate, role, userId }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [recurringInvoices, setRecurringInvoices] = useState<RecurringInvoice[]>([]);
@@ -66,10 +67,10 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
 
   useEffect(() => {
     fetchRecurring();
-  }, []);
+  }, [userId, role]);
 
   const fetchRecurring = async () => {
-    const data = await db.getRecurringInvoices();
+    const data = await db.getRecurringInvoices(role === 'Admin' ? undefined : userId);
     setRecurringInvoices(data || []);
   };
 
@@ -137,7 +138,8 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
       frequency,
       startDate,
       nextRunDate: startDate,
-      status: 'Active'
+      status: 'Active',
+      createdBy: userId,
     };
 
     try {

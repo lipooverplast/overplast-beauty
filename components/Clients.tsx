@@ -10,9 +10,10 @@ interface ClientsProps {
   onUpdate: () => void;
   onCreateInvoice?: (clientId: string) => void;
   role: UserRole;
+  userId?: string;
 }
 
-const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreateInvoice, role }) => {
+const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreateInvoice, role, userId }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [viewingClientDetails, setViewingClientDetails] = useState<Client | null>(null);
@@ -39,6 +40,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
       doctorName: formData.get('doctorName') as string,
       hospitalName: formData.get('hospitalName') as string,
       doctorPhone: formData.get('doctorPhone') as string,
+      createdBy: editingClient?.createdBy || userId,
     };
     
     try {

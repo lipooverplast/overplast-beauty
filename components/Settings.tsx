@@ -7,7 +7,12 @@ import {
 import { db } from '../db';
 import { isSupabaseConfigured, clearSupabaseConfig, supabase } from '../supabaseClient';
 
-const SettingsView: React.FC = () => {
+interface SettingsProps {
+  role?: string;
+  userId?: string;
+}
+
+const SettingsView: React.FC<SettingsProps> = ({ role, userId }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'deployment' | 'hosting'>('hosting');
   const [cloudUrl, setCloudUrl] = useState(localStorage.getItem('SUPABASE_URL_OVERRIDE') || '');
@@ -328,19 +333,21 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, postgres;
                 <h4 className="font-black text-gray-900 text-lg mb-2 uppercase tracking-tight">Ledger Export</h4>
                 <p className="text-sm text-gray-500 font-medium">Download full business state as JSON.</p>
               </div>
-              <button onClick={() => db.exportDatabase()} className="mt-10 py-5 bg-black text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
+              <button onClick={() => db.exportDatabase(role === 'Admin' ? undefined : userId)} className="mt-10 py-5 bg-black text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
                 <Download size={16} /> Export JSON
               </button>
            </div>
-           <div className="bg-red-50 p-10 rounded-[3rem] border border-red-100 flex flex-col justify-between">
-              <div>
-                <h4 className="font-black text-red-900 text-lg mb-2 uppercase tracking-tight">Erase Node</h4>
-                <p className="text-sm text-red-700 font-medium">Clear system configuration and unlink database.</p>
-              </div>
-              <button onClick={() => { if(confirm('Terminate app link?')) clearSupabaseConfig(); }} className="mt-10 py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
-                <Trash2 size={16} /> Wipe System
-              </button>
-           </div>
+           {role === 'Admin' && (
+             <div className="bg-red-50 p-10 rounded-[3rem] border border-red-100 flex flex-col justify-between">
+                <div>
+                  <h4 className="font-black text-red-900 text-lg mb-2 uppercase tracking-tight">Erase Node</h4>
+                  <p className="text-sm text-red-700 font-medium">Clear system configuration and unlink database.</p>
+                </div>
+                <button onClick={() => { if(confirm('Terminate app link?')) clearSupabaseConfig(); }} className="mt-10 py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
+                  <Trash2 size={16} /> Wipe System
+                </button>
+             </div>
+           )}
         </div>
       )}
     </div>

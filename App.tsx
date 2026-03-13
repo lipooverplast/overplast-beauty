@@ -13,6 +13,7 @@ import Invoices from './components/Invoices';
 import RecurringInvoices from './components/RecurringInvoices';
 import Clients from './components/Clients';
 import AdminOffice from './components/AdminOffice';
+import SettingsView from './components/Settings';
 import Auth from './components/Auth';
 
 import { APP_LOGO_URL, APP_NAME } from './constants';
@@ -69,21 +70,23 @@ const App: React.FC = () => {
           const p = await db.getProfile(user.id) || await db.ensureProfile(user);
           if (!p) setDbError(true);
           setProfile(p);
+          refreshData(false, p);
         } catch (e) {
           console.error("Init Data Fetch Error:", e);
           setDbError(true);
+          refreshData();
         } finally {
           setIsProfileLoading(false);
         }
       } else {
         setProfile(null);
+        refreshData();
       }
-      refreshData();
     };
     fetchInitialData();
   }, [user]);
 
-  const refreshData = async (isManual = false) => {
+  const refreshData = async (isManual = false, currentProfile = profile) => {
     if (isSupabaseConfigured && !user) {
       setIsLoading(false);
       return;
@@ -93,11 +96,14 @@ const App: React.FC = () => {
     else setIsLoading(true);
     
     try {
-      const isAdmin = !isSupabaseConfigured || profile?.role === 'Admin';
+      const isAdmin = !isSupabaseConfigured || 
+                      currentProfile?.role === 'Admin' || 
+                      currentProfile?.role === 'admin' || 
+                      user?.email === 'mtq16277@gmail.com';
       const filterId = isAdmin ? undefined : user?.id;
 
       const [p, c, i] = await Promise.all([
-        db.getProducts(),
+        db.getProducts(filterId),
         db.getClients(filterId),
         db.getInvoices(filterId)
       ]);
@@ -180,13 +186,13 @@ const App: React.FC = () => {
         <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />
       </div>
     ),
-    inventory: <Inventory products={products} onUpdate={refreshData} role={effectiveRole} />,
-    invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
-    recurring: <RecurringInvoices products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} />,
-    clients: <Clients clients={clients} invoices={invoices} onUpdate={refreshData} onCreateInvoice={handleCreateInvoiceForClient} role={effectiveRole} />,
-    'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
-    users: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
-    settings: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
+    inventory: <Inventory products={products} onUpdate={refreshData} role={effectiveRole} userId={user?.id} />,
+    invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
+    recurring: <RecurringInvoices products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} />,
+    clients: <Clients clients={clients} invoices={invoices} onUpdate={refreshData} onCreateInvoice={handleCreateInvoiceForClient} role={effectiveRole} userId={user?.id} />,
+    'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
+    users: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
+    settings: <SettingsView role={effectiveRole} userId={user?.id || ''} />,
   }[activeView];
 
   return (

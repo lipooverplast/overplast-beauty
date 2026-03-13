@@ -14,9 +14,10 @@ interface InventoryProps {
   products: Product[];
   onUpdate: () => void;
   role: UserRole;
+  userId?: string;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) => {
+const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, userId }) => {
   const [viewMode, setViewMode] = useState<'inventory' | 'history'>('inventory');
   const [searchTerm, setSearchTerm] = useState('');
   const [historySearch, setHistorySearch] = useState('');
@@ -50,7 +51,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
 
   const fetchTransactions = async () => {
     try {
-      const txs = await db.getStockTransactions();
+      const txs = await db.getStockTransactions(role === 'Admin' ? undefined : userId);
       setAllTransactions(txs);
       
       const flow = txs.reduce((acc, tx) => {
@@ -118,7 +119,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
         type: 'IN',
         quantity: restockQty,
         date: new Date().toISOString().split('T')[0],
-        note: 'Manual Restock'
+        note: 'Manual Restock',
+        createdBy: userId,
       };
 
       await db.saveProducts([updatedProduct]);
@@ -149,7 +151,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
         type: 'RETURN',
         quantity: returnQty,
         date: new Date().toISOString().split('T')[0],
-        note: returnNote || 'Stock Return'
+        note: returnNote || 'Stock Return',
+        createdBy: userId,
       };
 
       await db.saveProducts([updatedProduct]);
@@ -198,7 +201,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (role !== 'Admin') return;
+    // Removed role check to allow Staff to add their own products
     setIsSaving(true);
     const formData = new FormData(e.currentTarget);
     const mrp = Number(formData.get('mrp')) || 0;
@@ -206,6 +209,9 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
     const purchasePrice = Number(formData.get('purchasePrice')) || 0;
     const stock = parseInt(formData.get('stock') as string) || 0;
     const isNewProduct = !editingProduct;
+    
+    // Get current user info from props or db if needed
+    // But we can just pass it to db.saveProducts and it will handle it if missing
     
     const productData: Product = {
       id: editingProduct?.id || `prod-${Date.now()}`,
@@ -216,6 +222,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
       stock: stock,
       minStock: parseInt(formData.get('minStock') as string) || 0,
       description: formData.get('description') as string || '',
+      createdBy: editingProduct?.createdBy || userId,
+      // createdByName will be handled by db.saveProducts if we don't have it here
     };
 
     try {
@@ -229,7 +237,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role }) 
           type: 'IN',
           quantity: stock,
           date: new Date().toISOString().split('T')[0],
-          note: 'Initial Registration'
+          note: 'Initial Registration',
+          createdBy: userId,
         };
         await db.saveStockTransactions([transaction]);
       }

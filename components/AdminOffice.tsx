@@ -54,8 +54,10 @@ const AdminOffice: React.FC<{
   onNavigate: (view: ViewType) => void,
   invoices?: Invoice[],
   clients?: Client[],
-  products?: Product[]
-}> = ({ onUpdate, onNavigate, invoices: propInvoices, clients: propClients, products: propProducts }) => {
+  products?: Product[],
+  userId?: string,
+  role?: UserRole
+}> = ({ onUpdate, onNavigate, invoices: propInvoices, clients: propClients, products: propProducts, userId, role }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'activity' | 'infrastructure' | 'reports' | 'intelligence' | 'security'>('intelligence');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
@@ -91,16 +93,23 @@ const AdminOffice: React.FC<{
   }, [selectedMonth, propInvoices, propProducts]);
 
   const fetchAdminData = async () => {
-    if (!propInvoices) setLoading(true);
+    // If props are empty, we fetch from DB to ensure we have data
+    const shouldFetchInvoices = !propInvoices || propInvoices.length === 0;
+    const shouldFetchProducts = !propProducts || propProducts.length === 0;
+
+    if (shouldFetchInvoices || shouldFetchProducts) {
+      setLoading(true);
+    }
+
     try {
       const [profiles, invoices, products] = await Promise.all([
         db.getAllProfiles(),
-        propInvoices ? Promise.resolve(propInvoices) : db.getInvoices(),
-        propProducts ? Promise.resolve(propProducts) : db.getProducts()
+        shouldFetchInvoices ? db.getInvoices() : Promise.resolve(propInvoices!),
+        shouldFetchProducts ? db.getProducts() : Promise.resolve(propProducts!)
       ]);
 
-      if (!propInvoices) setAllInvoices(invoices);
-      if (!propProducts) setAllProducts(products);
+      setAllInvoices(invoices);
+      setAllProducts(products);
       
       // Reset AI summary when month changes
       setAiSummary(null);
@@ -545,7 +554,16 @@ const AdminOffice: React.FC<{
         ) : (
           <>
             {activeTab === 'users' && <UserManagement onUpdate={fetchAdminData} />}
-            {activeTab === 'activity' && <ActivityLog invoices={allInvoices} clients={propClients} products={allProducts} onRefresh={fetchAdminData} />}
+            {activeTab === 'activity' && (
+              <ActivityLog 
+                invoices={allInvoices} 
+                clients={propClients} 
+                products={allProducts} 
+                onRefresh={fetchAdminData} 
+                userId={userId}
+                role={role}
+              />
+            )}
             {activeTab === 'security' && <SecuritySettings />}
             {activeTab === 'infrastructure' && <SettingsView />}
             {activeTab === 'reports' && (

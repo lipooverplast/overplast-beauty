@@ -72,6 +72,8 @@ export interface Payment {
   amount: number;
   date: string;
   note?: string;
+  createdBy?: string;
+  createdByName?: string;
 }
 
 export interface Invoice {

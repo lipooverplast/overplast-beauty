@@ -48,9 +48,19 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isSupabaseConfigured && supabase) {
-      supabase.auth.getSession().then(({ data: { session } }: any) => {
-        setUser(session?.user ?? null);
+      supabase.auth.getSession().then(({ data: { session }, error }: any) => {
+        if (error && error.message.includes('Refresh Token')) {
+          console.warn("Auth: Invalid refresh token detected. Clearing session.");
+          supabase.auth.signOut();
+          setUser(null);
+        } else {
+          setUser(session?.user ?? null);
+        }
+      }).catch((err: any) => {
+        console.error("Auth: Session fetch failed", err);
+        setUser(null);
       });
+
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
         setUser(session?.user ?? null);
       });

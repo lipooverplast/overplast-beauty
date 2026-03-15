@@ -28,15 +28,27 @@ export const generateUUID = () => {
   });
 };
 
-const getUserId = async () => {
+const getSafeSession = async () => {
   if (!supabase) return null;
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id || null;
-    return isValidUUID(userId || '') ? userId : null;
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      if (error.message.includes('Refresh Token')) {
+        console.warn("Auth: Invalid refresh token, signing out.");
+        await supabase.auth.signOut();
+      }
+      return null;
+    }
+    return data.session;
   } catch (e) {
     return null;
   }
+};
+
+const getUserId = async () => {
+  const session = await getSafeSession();
+  const userId = session?.user?.id || null;
+  return isValidUUID(userId || '') ? userId : null;
 };
 
 /**
@@ -111,19 +123,10 @@ export const db = {
   getProducts: async (userId?: string): Promise<Product[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        // Fetch admin IDs to include their products for everyone
-        const { data: adminProfiles } = await supabase
-          .from('profiles')
-          .select('id')
-          .or('role.eq.Admin,role.eq.admin');
-        const adminIds = (adminProfiles || []).map(p => p.id);
-
         let query = supabase.from('products').select('*').order('name');
         
         if (userId) {
-          // If userId is provided (Staff mode), show their own products OR admin products
-          const allowedIds = [userId, ...adminIds];
-          query = query.in('user_id', allowedIds);
+          query = query.eq('user_id', userId);
         }
         
         const { data, error } = await withRetry(() => query);
@@ -164,7 +167,7 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSafeSession();
       const userId = session?.user?.id;
       const userEmail = session?.user?.email;
       if (!userId) throw new Error("Please log in again. Session expired.");
@@ -232,7 +235,7 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSafeSession();
       const userId = session?.user?.id;
       const userEmail = session?.user?.email;
       if (!userId) throw new Error("Please log in again. Session expired.");
@@ -315,7 +318,7 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSafeSession();
       const userId = session?.user?.id;
       const userEmail = session?.user?.email;
       if (!userId) throw new Error("Please log in again. Session expired.");
@@ -401,7 +404,7 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSafeSession();
       const userId = session?.user?.id;
       const userEmail = session?.user?.email;
       if (!userId) throw new Error("Please log in again. Session expired.");
@@ -500,6 +503,22 @@ export const db = {
     }
   },
 
+  deleteStockTransaction: async (id: string) => {
+    const idStr = String(id);
+    const localData = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+    if (localData) {
+      const current = JSON.parse(localData);
+      const filtered = current.filter((t: any) => String(t.id) !== idStr);
+      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(filtered));
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('stock_transactions').delete().eq('id', id);
+      } catch (e) {}
+    }
+  },
+
   deleteClient: async (id: string) => {
     const idStr = String(id);
     
@@ -528,18 +547,10 @@ export const db = {
   getStockTransactions: async (userId?: string): Promise<StockTransaction[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        // Fetch admin IDs to include their transactions for everyone
-        const { data: adminProfiles } = await supabase
-          .from('profiles')
-          .select('id')
-          .or('role.eq.Admin,role.eq.admin');
-        const adminIds = (adminProfiles || []).map(p => p.id);
-
         let query = supabase.from('stock_transactions').select('*').order('date', { ascending: false });
         
         if (userId) {
-          const allowedIds = [userId, ...adminIds];
-          query = query.in('user_id', allowedIds);
+          query = query.eq('user_id', userId);
         }
         
         const { data, error } = await withRetry(() => query);
@@ -563,7 +574,7 @@ export const db = {
 
   saveStockTransactions: async (transactions: StockTransaction[]) => {
     if (isSupabaseConfigured && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSafeSession();
       const userId = session?.user?.id;
       const userEmail = session?.user?.email;
       const dbRows = transactions.map(t => {
@@ -628,7 +639,7 @@ export const db = {
     if (!isValidUUID(payment.id)) payment.id = generateUUID();
 
     if (isSupabaseConfigured && supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSafeSession();
       const userId = session?.user?.id;
       const userEmail = session?.user?.email;
       

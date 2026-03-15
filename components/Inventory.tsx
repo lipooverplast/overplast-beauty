@@ -28,6 +28,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
   const [restockQty, setRestockQty] = useState(0);
   const [returnQty, setReturnQty] = useState(0);
   const [returnNote, setReturnNote] = useState('');
@@ -36,6 +37,10 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   // Custom Delete Confirmation State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [txToDelete, setTxToDelete] = useState<StockTransaction | null>(null);
+  const [showTxDeleteConfirm, setShowTxDeleteConfirm] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   
   // History State
   const [historyMonth, setHistoryMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
@@ -173,10 +178,6 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   const triggerDeleteConfirm = (e: React.MouseEvent, product: Product) => {
     e.preventDefault();
     e.stopPropagation();
-    if (role !== 'Admin') {
-      alert("Unauthorized: Only Administrators can delete assets.");
-      return;
-    }
     setProductToDelete(product);
     setShowDeleteConfirm(true);
   };
@@ -196,6 +197,47 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     } finally {
       setDeletingId(null);
       setProductToDelete(null);
+    }
+  };
+
+  const triggerTxDeleteConfirm = (tx: StockTransaction) => {
+    setTxToDelete(tx);
+    setShowTxDeleteConfirm(true);
+  };
+
+  const performTxDelete = async () => {
+    if (!txToDelete || !txToDelete.id) return;
+    setDeletingTxId(txToDelete.id);
+    setShowTxDeleteConfirm(false);
+
+    try {
+      await db.deleteStockTransaction(txToDelete.id);
+      await fetchTransactions();
+    } catch (err: any) {
+      console.error("Ledger Deletion Error:", err);
+      alert("Failed to delete ledger entry: " + err.message);
+    } finally {
+      setDeletingTxId(null);
+      setTxToDelete(null);
+    }
+  };
+
+  const performClearLedger = async () => {
+    setIsClearing(true);
+    setShowClearConfirm(false);
+
+    try {
+      const txsToDelete = filteredTransactions.map(tx => tx.id).filter(Boolean) as string[];
+      // Delete in batches or one by one
+      for (const id of txsToDelete) {
+        await db.deleteStockTransaction(id);
+      }
+      await fetchTransactions();
+    } catch (err: any) {
+      console.error("Clear Ledger Error:", err);
+      alert("Failed to clear ledger: " + err.message);
+    } finally {
+      setIsClearing(false);
     }
   };
 
@@ -310,16 +352,27 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
           
           <button onClick={onUpdate} className="p-4 bg-gray-50 text-gray-400 hover:text-black rounded-2xl border border-gray-200 transition-all"><RefreshCw size={20} /></button>
           
-          {viewMode === 'inventory' && role === 'Admin' && (
+          {viewMode === 'inventory' && (
             <button onClick={() => { setEditingProduct(null); setIsModalOpen(true); }} className="flex items-center justify-center gap-3 bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl">
               <Plus size={18} strokeWidth={3} className="text-yellow-500" /> Register Stock
             </button>
           )}
 
           {viewMode === 'history' && (
-            <button onClick={downloadStockReport} disabled={isGeneratingReport} className="flex items-center justify-center gap-3 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl disabled:opacity-50">
-              {isGeneratingReport ? <Loader2 className="animate-spin text-yellow-500" size={18} /> : <Download size={18} />} Stock Report
-            </button>
+            <div className="flex gap-3">
+              {filteredTransactions.length > 0 && (
+                <button 
+                  onClick={() => setShowClearConfirm(true)} 
+                  disabled={isClearing}
+                  className="flex items-center justify-center gap-3 bg-red-50 text-red-600 border border-red-100 px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-sm hover:bg-red-100 disabled:opacity-50"
+                >
+                  {isClearing ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />} Clear Ledger
+                </button>
+              )}
+              <button onClick={downloadStockReport} disabled={isGeneratingReport} className="flex items-center justify-center gap-3 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl disabled:opacity-50">
+                {isGeneratingReport ? <Loader2 className="animate-spin text-yellow-500" size={18} /> : <Download size={18} />} Stock Report
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -395,26 +448,24 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                          <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TP: Rs. {(product.tp || 0).toFixed(2)}</div>
                          <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">PP: Rs. {(product.purchasePrice || 0).toFixed(2)}</div>
                       </td>
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                          <div className="flex flex-col">
-                            <span className="text-sm font-black text-gray-900">{product.stock || 0}</span>
-                            <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1">
-                               <div className={`h-full rounded-full ${product.stock <= product.minStock ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${Math.min(((product.stock || 0) / Math.max(product.minStock * 2, 1)) * 100, 100)}%` }} />
+                          <td className="px-6 py-5">
+                            <div className="flex items-center gap-3">
+                              <div className="flex flex-col">
+                                <span className="text-sm font-black text-gray-900">{product.stock || 0}</span>
+                                <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1">
+                                   <div className={`h-full rounded-full ${product.stock <= product.minStock ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${Math.min(((product.stock || 0) / Math.max(product.minStock * 2, 1)) * 100, 100)}%` }} />
+                                </div>
+                              </div>
+                              <button 
+                                onClick={() => { setEditingProduct(product); setIsReturnModalOpen(true); }} 
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-100 text-amber-600 hover:bg-amber-100 rounded-lg transition-all shadow-sm ml-2" 
+                                title="Stock Return"
+                              >
+                                <RefreshCw size={12} />
+                                <span className="text-[9px] font-black uppercase tracking-widest whitespace-nowrap">Stock Return</span>
+                              </button>
                             </div>
-                          </div>
-                          {role === 'Admin' && (
-                            <button 
-                              onClick={() => { setEditingProduct(product); setIsReturnModalOpen(true); }} 
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-100 text-amber-600 hover:bg-amber-100 rounded-lg transition-all shadow-sm ml-2" 
-                              title="Stock Return"
-                            >
-                              <RefreshCw size={12} />
-                              <span className="text-[9px] font-black uppercase tracking-widest whitespace-nowrap">Stock Return</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                          </td>
                       <td className="px-6 py-5">
                         <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${status.color}`}>
                           {status.label}
@@ -425,30 +476,24 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                           <button onClick={() => viewItemHistory(product.name)} className="p-2.5 bg-blue-50 border border-blue-100 text-blue-600 hover:bg-blue-100 rounded-xl transition-all shadow-sm" title="Movement History">
                             <Clock size={16} />
                           </button>
-                          {role === 'Admin' ? (
-                            <>
-                              <button onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} className="p-2.5 bg-green-50 border border-green-100 text-green-600 hover:bg-green-100 rounded-xl transition-all shadow-sm" title="Restock Assets">
-                                <ArrowUpCircle size={16} />
-                              </button>
-                              <button onClick={() => { setEditingProduct(product); setIsModalOpen(true); }} className="p-2.5 bg-white border border-gray-200 text-gray-400 hover:text-black rounded-xl transition-all shadow-sm" title="Edit Item">
-                                <Edit size={16} />
-                              </button>
-                              <button 
-                                onClick={(e) => triggerDeleteConfirm(e, product)} 
-                                disabled={isDeleting}
-                                className={`p-2.5 rounded-xl transition-all shadow-sm border ${
-                                  isDeleting 
-                                  ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
-                                  : 'bg-white border-red-100 text-red-500 hover:bg-red-500 hover:text-white'
-                                }`} 
-                                title="Delete Permanently"
-                              >
-                                {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                              </button>
-                            </>
-                          ) : (
-                            <span className="text-[10px] font-black text-gray-300 uppercase italic">View Only</span>
-                          )}
+                          <button onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} className="p-2.5 bg-green-50 border border-green-100 text-green-600 hover:bg-green-100 rounded-xl transition-all shadow-sm" title="Restock Assets">
+                            <ArrowUpCircle size={16} />
+                          </button>
+                          <button onClick={() => { setEditingProduct(product); setIsModalOpen(true); }} className="p-2.5 bg-white border border-gray-200 text-gray-400 hover:text-black rounded-xl transition-all shadow-sm" title="Edit Item">
+                            <Edit size={16} />
+                          </button>
+                          <button 
+                            onClick={(e) => triggerDeleteConfirm(e, product)} 
+                            disabled={isDeleting}
+                            className={`p-2.5 rounded-xl transition-all shadow-sm border ${
+                              isDeleting 
+                              ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
+                              : 'bg-white border-red-100 text-red-500 hover:bg-red-500 hover:text-white'
+                            }`} 
+                            title="Delete Permanently"
+                          >
+                            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -534,6 +579,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       <th className="px-8 py-6 text-center">Movement Type</th>
                       <th className="px-8 py-6 text-right">Qty Flow</th>
                       <th className="px-8 py-6">Ledger Note</th>
+                      <th className="px-8 py-6 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -571,6 +617,16 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                           {tx.type === 'IN' ? '+' : '-'}{tx.quantity}
                         </td>
                         <td className="px-8 py-5 text-[11px] font-bold text-gray-400 italic">{tx.note || 'Manual Adjustment'}</td>
+                        <td className="px-8 py-5 text-right">
+                          <button 
+                            onClick={() => triggerTxDeleteConfirm(tx)}
+                            disabled={deletingTxId === tx.id}
+                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Delete Entry"
+                          >
+                            {deletingTxId === tx.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                          </button>
+                        </td>
                       </tr>
                     )) : (
                       <tr>
@@ -643,8 +699,72 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
         </div>
       )}
 
+      {/* Ledger Entry Deletion Confirmation */}
+      {showTxDeleteConfirm && txToDelete && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden border border-red-100 animate-in zoom-in-95 duration-200">
+            <div className="p-10 text-center">
+               <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
+                  <AlertTriangle size={40} />
+               </div>
+               <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2">Delete Ledger Entry</h3>
+               <p className="text-sm text-gray-500 font-bold mb-8 leading-relaxed px-4">
+                 Are you sure you want to remove this movement record for <span className="text-red-600 font-black">"{txToDelete.productName}"</span>? This will not affect current stock levels, only the history.
+               </p>
+               
+               <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={performTxDelete}
+                    className="w-full py-5 bg-red-600 text-white font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-red-700 transition-all shadow-xl shadow-red-900/10 flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={16} /> Delete Record
+                  </button>
+                  <button 
+                    onClick={() => { setShowTxDeleteConfirm(false); setTxToDelete(null); }}
+                    className="w-full py-5 bg-gray-100 text-gray-600 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-gray-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly Ledger Clear Confirmation */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden border border-red-100 animate-in zoom-in-95 duration-200">
+            <div className="p-10 text-center">
+               <div className="w-20 h-20 bg-red-50 text-red-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
+                  <AlertTriangle size={40} />
+               </div>
+               <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2">Clear Monthly Ledger</h3>
+               <p className="text-sm text-gray-500 font-bold mb-8 leading-relaxed px-4">
+                 You are about to delete <span className="text-red-600 font-black">{filteredTransactions.length}</span> records for the period <span className="text-black font-black">{historyMonth}</span>. This action is irreversible.
+               </p>
+               
+               <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={performClearLedger}
+                    className="w-full py-5 bg-red-600 text-white font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-red-700 transition-all shadow-xl shadow-red-900/10 flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={16} /> Yes, Clear All Records
+                  </button>
+                  <button 
+                    onClick={() => setShowClearConfirm(false)}
+                    className="w-full py-5 bg-gray-100 text-gray-600 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-gray-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Registration/Edit Modal */}
-      {isModalOpen && role === 'Admin' && (
+      {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
           <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
             <div className="p-8 border-b flex items-center justify-between bg-gray-50/50">

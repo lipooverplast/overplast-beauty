@@ -28,6 +28,7 @@ if (isValidUrl(storedUrl) && storedKey.length > 20) {
   }
 }
 
+export const supabaseUrl = storedUrl;
 export const supabase = supabaseInstance;
 
 // isSupabaseConfigured now ensures both the keys exist AND the instance was successfully created

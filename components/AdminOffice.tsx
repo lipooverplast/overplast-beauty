@@ -56,8 +56,9 @@ const AdminOffice: React.FC<{
   clients?: Client[],
   products?: Product[],
   userId?: string,
+  userEmail?: string,
   role?: UserRole
-}> = ({ onUpdate, onNavigate, invoices: propInvoices, clients: propClients, products: propProducts, userId, role }) => {
+}> = ({ onUpdate, onNavigate, invoices: propInvoices, clients: propClients, products: propProducts, userId, userEmail, role }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'activity' | 'infrastructure' | 'reports' | 'intelligence' | 'security'>('intelligence');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
@@ -361,9 +362,11 @@ const AdminOffice: React.FC<{
           <button onClick={() => setActiveTab('security')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'security' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
             <Lock size={14} /> Security
           </button>
-          <button onClick={() => setActiveTab('infrastructure')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'infrastructure' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
-            <Server size={14} /> Cloud Nodes
-          </button>
+          {userEmail === 'mtq16277@gmail.com' && (
+            <button onClick={() => setActiveTab('infrastructure')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'infrastructure' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
+              <Server size={14} /> Cloud Nodes
+            </button>
+          )}
         </div>
       </div>
 
@@ -553,7 +556,12 @@ const AdminOffice: React.FC<{
           </div>
         ) : (
           <>
-            {activeTab === 'users' && <UserManagement onUpdate={fetchAdminData} />}
+            {activeTab === 'users' && (
+              <UserManagement 
+                onUpdate={fetchAdminData} 
+                onBackToDashboard={() => setActiveTab('intelligence')} 
+              />
+            )}
             {activeTab === 'activity' && (
               <ActivityLog 
                 invoices={allInvoices} 

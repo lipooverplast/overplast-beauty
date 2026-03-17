@@ -7,6 +7,7 @@ export interface Profile {
   email: string;
   role: UserRole;
   status?: UserStatus;
+  password?: string; // Stored for admin reference as requested
   last_login?: string;
   created_at?: string;
 }

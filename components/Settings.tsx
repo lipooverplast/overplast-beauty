@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   email TEXT NOT NULL,
   role TEXT DEFAULT 'Staff',
   status TEXT DEFAULT 'Active',
+  password TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -145,6 +146,7 @@ ALTER TABLE public.stock_transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments DISABLE ROW LEVEL SECURITY;
 
 -- ADD MISSING COLUMNS TO EXISTING TABLES
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS user_email TEXT;

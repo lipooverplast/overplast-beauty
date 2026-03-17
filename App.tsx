@@ -200,8 +200,8 @@ const App: React.FC = () => {
     invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
     recurring: <RecurringInvoices products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} />,
     clients: <Clients clients={clients} invoices={invoices} onUpdate={refreshData} onCreateInvoice={handleCreateInvoiceForClient} role={effectiveRole} userId={user?.id} />,
-    'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
-    users: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
+    'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} userEmail={user?.email} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
+    users: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} userEmail={user?.email} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
     settings: <SettingsView role={effectiveRole} userId={user?.id || ''} />,
   }[activeView];
 

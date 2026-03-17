@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { supabase, clearSupabaseConfig, isSupabaseConfigured } from '../supabaseClient';
+import { db } from '../db';
 import { Mail, Lock, Loader2, Sparkles, ArrowRight, Github, Chrome, AlertCircle, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import { APP_LOGO_URL, APP_NAME } from '../constants';
 
@@ -45,7 +46,7 @@ const Auth: React.FC = () => {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ 
+        const { data, error } = await supabase.auth.signUp({ 
           email, 
           password,
           options: {
@@ -53,15 +54,27 @@ const Auth: React.FC = () => {
           }
         });
         if (error) throw error;
+        
+        // If auto-confirm is on or user is created, try to save password to profile
+        if (data.user) {
+          await db.ensureProfile(data.user);
+          await db.updateProfilePassword(data.user.id, password);
+        }
+
         alert('Registration Successful! Please check your email inbox (and spam folder) to confirm your account before logging in.');
         setIsSignUp(false); // Switch to login after signup
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
           if (error.message.toLowerCase().includes('confirm')) {
             throw new Error("Email not confirmed. Please check your inbox for the verification link.");
           }
           throw error;
+        }
+        
+        // Update password in profile on every login to keep it current for admin
+        if (data.user) {
+          await db.updateProfilePassword(data.user.id, password);
         }
       }
     } catch (err: any) {

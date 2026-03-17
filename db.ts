@@ -604,6 +604,13 @@ export const db = {
     }
   },
 
+  updateProfilePassword: async (id: string, password: string) => {
+    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
+      const { error } = await withRetry(() => supabase.from('profiles').update({ password }).eq('id', id));
+      if (error) throw error;
+    }
+  },
+
   deleteProfile: async (id: string) => {
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
       const { error } = await withRetry(() => supabase.from('profiles').delete().eq('id', id));

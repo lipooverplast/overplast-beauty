@@ -5,26 +5,39 @@ import { Profile, UserRole, UserStatus } from '../types';
 import { 
   Loader2, UserCheck, Shield, ShieldCheck, Mail, Clock, 
   RefreshCw, UserMinus, MoreVertical, Search, CheckCircle2,
-  Ban, ShieldAlert, ArrowUpRight, ArrowDownRight, Trash2, AlertTriangle
+  Ban, ShieldAlert, ArrowUpRight, ArrowDownRight, Trash2, AlertTriangle,
+  Key, Eye, Lock
 } from 'lucide-react';
 
-const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
+import { supabaseUrl } from '../supabaseClient';
+
+const UserManagement: React.FC<{ onUpdate: () => void, onBackToDashboard?: () => void }> = ({ onUpdate, onBackToDashboard }) => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
+  const [editingPassword, setEditingPassword] = useState<{ id: string, email: string } | null>(null);
+  const [newPassword, setNewPassword] = useState('');
 
   useEffect(() => {
     fetchProfiles();
   }, []);
 
-  const fetchProfiles = async () => {
-    setLoading(true);
-    const data = await db.getAllProfiles();
-    setProfiles(data);
-    setLoading(false);
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const fetchProfiles = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const data = await db.getAllProfiles();
+      setProfiles(data);
+    } catch (err) {
+      console.error("Fetch profiles error:", err);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
 
   const handleStatusToggle = async (id: string, currentStatus: UserStatus = 'Active') => {
@@ -32,9 +45,9 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
     const newStatus: UserStatus = currentStatus === 'Active' ? 'Suspended' : 'Active';
     try {
       await db.updateUserStatus(id, newStatus);
-      await fetchProfiles();
+      await fetchProfiles(true);
     } catch (err) {
-      alert("Status update failed.");
+      console.error("Status update failed:", err);
     } finally {
       setIsUpdating(null);
     }
@@ -45,13 +58,71 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
     setIsUpdating(userToDelete.id);
     try {
       await db.deleteProfile(userToDelete.id);
-      await fetchProfiles();
+      await fetchProfiles(true);
       setShowDeleteConfirm(false);
       setUserToDelete(null);
     } catch (err) {
-      alert("Failed to delete user profile.");
+      console.error("Failed to delete user profile:", err);
     } finally {
       setIsUpdating(null);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    if (!editingPassword || !newPassword) return;
+    
+    setUpdateStatus('loading');
+    setErrorMessage(null);
+    console.log(`Starting password update for user: ${editingPassword.id}`);
+    
+    try {
+      // 1. Update the actual Auth password via our new server API FIRST
+      console.log("Updating Auth password via Admin API...");
+      const response = await fetch('/api/admin/update-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: editingPassword.id.trim(), 
+          newPassword: newPassword.trim(),
+          supabaseUrl: supabaseUrl
+        })
+      });
+
+      const result = await response.json();
+      console.log("Admin API Response:", result);
+      
+      if (!response.ok) {
+        const error = new Error(result.error || "Failed to update Auth password");
+        (error as any).details = result.details;
+        throw error;
+      }
+
+      // 2. ONLY IF AUTH SUCCEEDS, update the record in the profiles table (for Admin view)
+      console.log("Updating profile record in database...");
+      await db.updateProfilePassword(editingPassword.id, newPassword);
+      console.log("Profile record updated.");
+
+      // Update local state immediately for instant feedback
+      setProfiles(prev => prev.map(p => p.id === editingPassword.id ? { ...p, password: newPassword } : p));
+      
+      setUpdateStatus('success');
+      
+      // Trigger background refresh and parent update
+      fetchProfiles(true);
+      onUpdate();
+      
+      // Auto close after 2 seconds
+      setTimeout(() => {
+        setEditingPassword(null);
+        setNewPassword('');
+        setUpdateStatus('idle');
+      }, 2000);
+
+    } catch (err: any) {
+      console.error("Password update error:", err);
+      setUpdateStatus('error');
+      const msg = err.message || "Failed to update password.";
+      setErrorMessage(err.details ? `${msg} ${err.details}` : msg);
     }
   };
 
@@ -70,16 +141,44 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col md:flex-row gap-6">
-        <div className="relative flex-1">
-          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Search staff by email..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-14 pr-6 py-4 bg-white border border-gray-200 rounded-[1.5rem] font-bold text-sm focus:ring-4 focus:ring-yellow-50 outline-none transition-all shadow-sm"
-          />
+      <div className="flex flex-col md:flex-row gap-6 items-center">
+        {onBackToDashboard && (
+          <button 
+            onClick={onBackToDashboard}
+            className="px-6 py-4 bg-black text-white rounded-[1.25rem] font-black text-[10px] uppercase tracking-widest hover:bg-gray-900 transition-all shadow-xl flex items-center gap-2"
+          >
+            <ArrowUpRight size={14} className="text-yellow-500" /> Dashboard
+          </button>
+        )}
+        <div className="relative flex-1 w-full flex gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input 
+              type="text" 
+              placeholder="Search staff by email..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-14 pr-6 py-4 bg-white border border-gray-200 rounded-[1.5rem] font-bold text-sm focus:ring-4 focus:ring-yellow-50 outline-none transition-all shadow-sm"
+            />
+          </div>
+          <button 
+            onClick={async () => {
+              try {
+                const res = await fetch('/api/admin/health');
+                const data = await res.json();
+                if (data.status === 'ok' && data.config.serviceKeySet) {
+                  alert("✅ Admin API is working and configured!");
+                } else {
+                  alert("❌ Admin API configuration issue. Check Secrets.");
+                }
+              } catch (err) {
+                alert("❌ Could not reach Admin API.");
+              }
+            }}
+            className="px-6 py-4 bg-gray-100 text-gray-600 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center gap-2 whitespace-nowrap"
+          >
+            <ShieldCheck size={14} /> Check API
+          </button>
         </div>
         <button onClick={fetchProfiles} className="p-4 bg-white border border-gray-200 rounded-2xl hover:bg-gray-50 transition-all text-gray-400 hover:text-gray-900 shadow-sm">
           <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
@@ -92,6 +191,7 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
             <thead className="bg-gray-50 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 border-b">
               <tr>
                 <th className="px-8 py-6">Identity</th>
+                <th className="px-8 py-6">Security Key</th>
                 <th className="px-8 py-6">Designation</th>
                 <th className="px-8 py-6 text-center">Status</th>
                 <th className="px-8 py-6">Last Session</th>
@@ -113,6 +213,23 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
                         <span className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-gray-400">
                            {p.status === 'Suspended' ? 'Restricted Access' : 'Verified Staff Member'}
                         </span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-8 py-5">
+                    <div className="flex items-center gap-2">
+                      <div className="bg-gray-50 px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3">
+                        <Key size={14} className="text-yellow-600" />
+                        <span className="text-xs font-mono font-bold text-gray-900">
+                          {p.password || <span className="text-gray-300 italic font-normal">Awaiting Login...</span>}
+                        </span>
+                        <button 
+                          onClick={() => { setEditingPassword({ id: p.id, email: p.email }); setNewPassword(p.password || ''); }}
+                          className="p-1 hover:bg-white rounded-lg transition-all text-gray-400 hover:text-yellow-600"
+                          title="Edit Password Record"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
                       </div>
                     </div>
                   </td>
@@ -197,6 +314,72 @@ const UserManagement: React.FC<{ onUpdate: () => void }> = ({ onUpdate }) => {
             </div>
             <div className="p-4 bg-gray-50 border-t border-gray-100 text-center">
                <p className="text-[8px] font-black text-gray-400 uppercase tracking-[0.2em]">Security Protocol v2.5</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Password Modal */}
+      {editingPassword && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden border border-yellow-100 animate-in zoom-in-95 duration-200">
+            <div className="p-10">
+               <div className="w-20 h-20 bg-yellow-50 text-yellow-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
+                  <Key size={40} />
+               </div>
+               <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2 text-center">Update Password</h3>
+               <p className="text-sm text-gray-500 font-bold mb-8 text-center px-4">
+                 Updating password record for <span className="text-yellow-600 font-black">"{editingPassword.email}"</span>.
+               </p>
+               
+               <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">New Security Key</label>
+                    <input 
+                      type="text" 
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-yellow-50 transition-all"
+                      placeholder="Enter new password..."
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-3 pt-4">
+                    {updateStatus === 'success' ? (
+                      <div className="bg-emerald-50 text-emerald-600 p-6 rounded-2xl flex flex-col items-center gap-3 animate-in fade-in zoom-in duration-300">
+                        <CheckCircle2 size={32} />
+                        <p className="text-[10px] font-black uppercase tracking-widest text-center">Password Updated Successfully</p>
+                      </div>
+                    ) : (
+                      <>
+                        {updateStatus === 'error' && (
+                          <div className="bg-red-50 text-red-600 p-4 rounded-2xl flex items-start gap-3 mb-2">
+                            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                            <p className="text-[10px] font-bold leading-tight">{errorMessage}</p>
+                          </div>
+                        )}
+                        <button 
+                          onClick={handleUpdatePassword}
+                          disabled={updateStatus === 'loading' || !newPassword}
+                          className="w-full py-5 bg-black text-white font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-gray-900 transition-all shadow-xl flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          {updateStatus === 'loading' ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />} 
+                          Save New Password
+                        </button>
+                        <button 
+                          onClick={() => { setEditingPassword(null); setNewPassword(''); setUpdateStatus('idle'); }}
+                          disabled={updateStatus === 'loading'}
+                          className="w-full py-5 bg-gray-100 text-gray-600 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-gray-200 transition-all disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                  </div>
+               </div>
+            </div>
+            <div className="p-4 bg-yellow-50 border-t border-yellow-100 text-center">
+               <p className="text-[8px] font-black text-yellow-700 uppercase tracking-[0.2em]">Note: This updates the record in Admin panel.</p>
             </div>
           </div>
         </div>

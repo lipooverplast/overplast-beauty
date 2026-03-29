@@ -22,8 +22,10 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay =
                           JSON.stringify(error).includes('429') ||
                           error?.message?.includes('RESOURCE_EXHAUSTED');
       
-      const isNetworkError = error?.message === 'Failed to fetch' || 
-                             error?.name === 'TypeError' && error?.message?.includes('fetch');
+      const errorMsg = String(error?.message || error || '').toLowerCase();
+      const isNetworkError = errorMsg.includes('fetch') || 
+                             errorMsg.includes('network') ||
+                             errorMsg.includes('load failed');
       
       if ((isRateLimit || isNetworkError) && i < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, i);
@@ -77,7 +79,8 @@ export const geminiService = {
       }
       
       console.error("AI Analysis Error:", error);
-      if (error.message === 'Failed to fetch') {
+      const errorMsg = String(error?.message || error || '').toLowerCase();
+      if (errorMsg.includes('fetch')) {
         return "AI Advisor is offline. Please check your internet connection.";
       }
       return "System is reviewing stock levels. Please check Critical Stock alerts in the dashboard.";
@@ -134,10 +137,11 @@ export const geminiService = {
       return JSON.parse(text.trim());
     } catch (error: any) {
       console.error("AI Document Parsing Error:", error);
-      if (JSON.stringify(error).includes('429') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+      const errorMsg = String(error?.message || error || '').toLowerCase();
+      if (errorMsg.includes('429') || errorMsg.includes('resource_exhausted')) {
         throw new Error("AI Document Reader is currently at capacity. Please wait a moment and try again.");
       }
-      if (error.message === 'Failed to fetch') {
+      if (errorMsg.includes('fetch')) {
         throw new Error("Network Error: Could not reach AI service. Check your internet.");
       }
       throw new Error("Could not read the document. Ensure the image is clear and well-lit.");

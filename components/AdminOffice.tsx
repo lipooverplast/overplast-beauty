@@ -20,7 +20,7 @@ import SettingsView from './Settings';
 import SecuritySettings from './SecuritySettings';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import { APP_LOGO_URL, APP_NAME } from '../constants';
+import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from '../constants';
 import { geminiService } from '../geminiService';
 
 const AdminLogo = () => (
@@ -44,6 +44,7 @@ const AdminLogo = () => (
           <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
           <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">Ph: +92 301 844 4449</p>
           <p className="text-[7px] font-bold text-gray-400 lowercase tracking-tight">Email: care@overplast.org</p>
+          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">NTN/GST: 2521812-3</p>
         </div>
     </div>
   </div>
@@ -362,7 +363,7 @@ const AdminOffice: React.FC<{
           <button onClick={() => setActiveTab('security')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'security' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
             <Lock size={14} /> Security
           </button>
-          {userEmail === 'mtq16277@gmail.com' && (
+          {userEmail === ADMIN_EMAIL && (window.location.hostname.includes('localhost') || window.location.hostname.includes('-dev-')) && (
             <button onClick={() => setActiveTab('infrastructure')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'infrastructure' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
               <Server size={14} /> Cloud Nodes
             </button>

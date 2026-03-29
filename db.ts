@@ -1,5 +1,6 @@
 
 import { Product, Client, Invoice, RecurringInvoice, Profile, UserRole, UserStatus, StockTransaction, Payment } from './types';
+import { ADMIN_EMAIL } from './constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const STORAGE_KEYS = {
@@ -31,16 +32,28 @@ export const generateUUID = () => {
 const getSafeSession = async () => {
   if (!supabase) return null;
   try {
-    const { data, error } = await supabase.auth.getSession();
+    const { data, error } = await withRetry(() => supabase.auth.getSession());
     if (error) {
-      if (error.message.includes('Refresh Token')) {
+      const errorMsg = String(error.message || '').toLowerCase();
+      if (errorMsg.includes('refresh token') || errorMsg.includes('refresh_token_not_found')) {
         console.warn("Auth: Invalid refresh token, signing out.");
-        await supabase.auth.signOut();
+        await supabase.auth.signOut().catch(() => {});
+        // Clear local storage as a last resort
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.includes('supabase.auth.token')) {
+            localStorage.removeItem(key);
+          }
+        }
       }
       return null;
     }
     return data.session;
-  } catch (e) {
+  } catch (e: any) {
+    const errorMsg = String(e?.message || e || '').toLowerCase();
+    if (errorMsg.includes('refresh token') || errorMsg.includes('refresh_token_not_found')) {
+      await supabase.auth.signOut().catch(() => {});
+    }
     return null;
   }
 };
@@ -54,17 +67,55 @@ const getUserId = async () => {
 /**
  * Helper to retry database operations on transient network errors.
  */
-async function withRetry(fn: () => any, maxRetries = 3, initialDelay = 1000): Promise<any> {
+async function withRetry(fn: () => any, maxRetries = 5, initialDelay = 1500): Promise<any> {
   let lastError: any;
   for (let i = 0; i < maxRetries; i++) {
     try {
       const result = await fn();
+      
+      // Supabase often returns errors in the result object instead of throwing
+      if (result && result.error) {
+        const error = result.error;
+        const errorMsg = String(error.message || '').toLowerCase();
+        const isNetworkError = errorMsg.includes('fetch') || 
+                               errorMsg.includes('network') ||
+                               error.status === 0 || 
+                               error.status >= 500;
+        
+        if (isNetworkError && i < maxRetries - 1) {
+          const delay = initialDelay * Math.pow(2, i);
+          console.warn(`Database Network Error (in result). Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        // If it's a network error and we're out of retries, throw it so the catch block handles it
+        if (isNetworkError) {
+          throw error;
+        }
+      }
+      
       return result;
     } catch (error: any) {
       lastError = error;
-      const isNetworkError = error?.message === 'Failed to fetch' || 
-                             error?.name === 'TypeError' && error?.message?.includes('fetch') ||
+      
+      // Handle Auth Errors
+      const errorMsg = String(error?.message || error || '').toLowerCase();
+      if (errorMsg.includes('refresh token') || errorMsg.includes('refresh_token_not_found')) {
+        console.warn("Auth: Refresh token error in withRetry. Signing out.");
+        supabase?.auth.signOut().catch(() => {});
+        throw new Error("Session expired. Please log in again.");
+      }
+
+      const isNetworkError = errorMsg.includes('fetch') || 
+                             errorMsg.includes('network') ||
+                             errorMsg.includes('load failed') ||
                              error?.status === 0 || error?.status >= 500;
+      
+      // Silence MetaMask/Web3 related fetch errors
+      const silencePatterns = ['metamask', 'ethereum', 'web3', 'rpc', 'provider', 'wallet'];
+      if (silencePatterns.some(p => errorMsg.includes(p))) {
+        return null; // Just return null for silenced errors
+      }
       
       if (isNetworkError && i < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, i);
@@ -72,6 +123,11 @@ async function withRetry(fn: () => any, maxRetries = 3, initialDelay = 1000): Pr
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
+      
+      if (errorMsg.includes('fetch')) {
+        throw new Error("Cloud connectivity lost. Please check your internet connection and Supabase configuration.");
+      }
+      
       throw error;
     }
   }
@@ -99,7 +155,7 @@ export const db = {
       const { data: existingProfile } = await withRetry(() => supabase.from('profiles').select('*').eq('id', user.id).maybeSingle());
       if (existingProfile) return existingProfile;
       const { data: adminCheck } = await withRetry(() => supabase.from('profiles').select('id').eq('role', 'Admin').limit(1));
-      const isFirstAdmin = !adminCheck || adminCheck.length === 0;
+      const isFirstAdmin = (!adminCheck || adminCheck.length === 0) || user.email === ADMIN_EMAIL;
       const newProfile = { id: user.id, email: user.email, role: isFirstAdmin ? 'Admin' : 'Staff', status: 'Active' };
       const { data: createdProfile, error: upsertError } = await withRetry(() => supabase.from('profiles').upsert(newProfile).select().single());
       if (upsertError) throw upsertError;
@@ -123,24 +179,39 @@ export const db = {
   getProducts: async (userId?: string): Promise<Product[]> => {
     try {
       if (isSupabaseConfigured && supabase) {
-        let query = supabase.from('products').select('*').order('name');
+        // Fetch ALL products (Supabase will handle RLS if enabled)
+        const { data, error } = await withRetry(() => supabase.from('products').select('*').order('name'));
+        if (error) throw error;
         
+        const allProducts = (data || []).map(p => {
+          // If it's an admin product but email is missing, fill it in for the UI
+          const isSystemProduct = !p.user_id || p.user_email === ADMIN_EMAIL || !p.user_email;
+          const createdByName = p.user_email || (isSystemProduct ? ADMIN_EMAIL : '');
+          
+          return {
+            id: p.id, name: p.name, sku: p.sku || '', category: p.category || 'General',
+            price: Number(p.tp) || Number(p.price) || 0, cost: Number(p.cost) || 0,
+            purchasePrice: Number(p.cost) || 0,
+            mrp: Number(p.mrp) || 0, tp: Number(p.tp) || 0, stock: Number(p.stock) || 0,
+            minStock: Number(p.min_stock) || 0, description: p.description || '',
+            size: p.size || '',
+            createdBy: p.user_id,
+            createdByName: createdByName,
+            createdAt: p.created_at
+          };
+        });
+
         if (userId) {
-          query = query.eq('user_id', userId);
+          // Filter for staff users: Own products OR Admin's products OR Shared products
+          return allProducts.filter(p => 
+            p.createdBy === userId || 
+            p.createdByName === ADMIN_EMAIL ||
+            !p.createdBy ||
+            p.createdByName === '' // Also show products with no owner info as they might be admin's legacy products
+          );
         }
         
-        const { data, error } = await withRetry(() => query);
-        if (error) throw error;
-        return (data || []).map(p => ({
-          id: p.id, name: p.name, sku: p.sku || '', category: p.category || 'General',
-          price: Number(p.tp) || Number(p.price) || 0, cost: Number(p.cost) || 0,
-          purchasePrice: Number(p.cost) || 0,
-          mrp: Number(p.mrp) || 0, tp: Number(p.tp) || 0, stock: Number(p.stock) || 0,
-          minStock: Number(p.min_stock) || 0, description: p.description || '',
-          createdBy: p.user_id,
-          createdByName: p.user_email,
-          createdAt: p.created_at
-        }));
+        return allProducts;
       }
     } catch (err) {
       console.error("Error fetching products:", err);
@@ -149,16 +220,19 @@ export const db = {
     const products = data ? JSON.parse(data) : [];
     
     if (userId) {
-      // For local storage, we don't easily know who the admin is, 
-      // but we can assume products with no createdBy or specific admin email are shared
-      // For simplicity in local mode, we'll just show all products if it's a small shop
-      // or filter by userId. But the user wants admin products shared.
-      return products.filter((p: any) => p.createdBy === userId || !p.createdBy);
+      // For local storage, we'll show products belonging to the user OR products belonging to the admin
+      // We also check for 'Admin' role if we had it, but here we'll stick to email and shared products
+      return products.filter((p: any) => 
+        p.createdBy === userId || 
+        !p.createdBy || 
+        p.createdByName === ADMIN_EMAIL ||
+        p.user_email === ADMIN_EMAIL
+      );
     }
     return products;
   },
 
-  saveProducts: async (productsToSave: Product[]) => {
+  saveProducts: async (productsToSave: Product[], userId?: string, userEmail?: string) => {
     const processedProducts = productsToSave.map(p => {
       if (!isValidUUID(p.id)) {
         p.id = generateUUID();
@@ -167,24 +241,43 @@ export const db = {
     });
 
     if (isSupabaseConfigured && supabase) {
-      const session = await getSafeSession();
-      const userId = session?.user?.id;
-      const userEmail = session?.user?.email;
-      if (!userId) throw new Error("Please log in again. Session expired.");
+      let effectiveUserId = userId;
+      let effectiveUserEmail = userEmail;
+      
+      if (!effectiveUserId || !effectiveUserEmail) {
+        const session = await getSafeSession();
+        if (!effectiveUserId) effectiveUserId = session?.user?.id;
+        if (!effectiveUserEmail) effectiveUserEmail = session?.user?.email;
+      }
+      
+      if (!effectiveUserId) throw new Error("Please log in again. Session expired.");
       
       const dbRows = processedProducts.map(p => {
         const row: any = {
           id: p.id,
-          name: p.name, sku: p.sku, category: p.category,
-          price: p.tp, cost: p.purchasePrice, mrp: p.mrp, tp: p.tp, stock: p.stock,
-          min_stock: p.minStock, description: p.description
+          name: p.name,
+          sku: p.sku,
+          category: p.category,
+          price: Number(p.tp) || 0,
+          cost: Number(p.purchasePrice) || 0,
+          mrp: Number(p.mrp) || 0,
+          tp: Number(p.tp) || 0,
+          stock: Number(p.stock) || 0,
+          min_stock: Number(p.minStock) || 0,
+          description: p.description || '',
+          size: p.size || ''
         };
-        row.user_id = p.createdBy || userId;
-        row.user_email = p.createdByName || userEmail;
+        row.user_id = p.createdBy || effectiveUserId;
+        row.user_email = p.createdByName || effectiveUserEmail;
         return row;
       });
       const { error } = await withRetry(() => supabase.from('products').upsert(dbRows));
-      if (error) throw new Error(error.message);
+      if (error) {
+        if (error.code === '42703' || error.message.includes('column')) {
+          throw new Error("Missing columns in 'products' table. Please run the Repair Script in Settings.");
+        }
+        throw new Error(error.message);
+      }
     }
     
     // Merge with existing LocalStorage data
@@ -558,6 +651,7 @@ export const db = {
         return (data || []).map(t => ({
           id: t.id, productId: t.product_id, productName: t.product_name,
           type: t.type, quantity: Number(t.quantity), date: t.date, note: t.note,
+          productSize: t.product_size,
           createdBy: t.user_id,
           createdByName: t.user_email,
           createdAt: t.created_at
@@ -572,28 +666,47 @@ export const db = {
     return transactions;
   },
 
-  saveStockTransactions: async (transactions: StockTransaction[]) => {
+  saveStockTransactions: async (transactions: StockTransaction[], userId?: string, userEmail?: string) => {
     if (isSupabaseConfigured && supabase) {
-      const session = await getSafeSession();
-      const userId = session?.user?.id;
-      const userEmail = session?.user?.email;
+      let effectiveUserId = userId;
+      let effectiveUserEmail = userEmail;
+      
+      if (!effectiveUserId || !effectiveUserEmail) {
+        const session = await getSafeSession();
+        if (!effectiveUserId) effectiveUserId = session?.user?.id;
+        if (!effectiveUserEmail) effectiveUserEmail = session?.user?.email;
+      }
+      
+      if (!effectiveUserId) throw new Error("Please log in again. Session expired.");
+      
       const dbRows = transactions.map(t => {
         const row: any = {
-          user_id: t.createdBy || userId, 
-          user_email: t.createdByName || userEmail,
+          user_id: t.createdBy || effectiveUserId, 
+          user_email: t.createdByName || effectiveUserEmail,
           product_id: t.productId, product_name: t.productName,
-          type: t.type, quantity: t.quantity, date: t.date, note: t.note
+          type: t.type, quantity: t.quantity, date: t.date, note: t.note,
+          product_size: t.productSize
         };
         row.id = isValidUUID(t.id) ? t.id : generateUUID();
         return row;
       });
       const { error } = await withRetry(() => supabase.from('stock_transactions').upsert(dbRows));
-      if (error) throw new Error(error.message);
+      if (error) {
+        if (error.code === '42703' || error.message.includes('column')) {
+          throw new Error("Missing columns in 'stock_transactions' table. Please run the Repair Script in Settings.");
+        }
+        throw new Error(error.message);
+      }
     }
     
     const localData = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
     const existing = localData ? JSON.parse(localData) : [];
-    const updated = [...existing, ...transactions];
+    const updated = [...existing];
+    transactions.forEach(newT => {
+      const idx = updated.findIndex(t => t.id === newT.id);
+      if (idx > -1) updated[idx] = newT;
+      else updated.push(newT);
+    });
     localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
   },
 

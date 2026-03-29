@@ -16,6 +16,7 @@ export interface Product {
   id: string;
   name: string;
   sku: string;
+  size?: string;
   category: string;
   price: number;
   cost: number;
@@ -34,6 +35,7 @@ export interface StockTransaction {
   id: string;
   productId: string;
   productName: string;
+  productSize?: string;
   type: 'IN' | 'OUT' | 'RETURN';
   quantity: number;
   date: string;
@@ -59,6 +61,7 @@ export interface Client {
 export interface InvoiceItem {
   productId: string;
   name: string;
+  size?: string;
   quantity: number;
   price: number; 
   mrp: number;

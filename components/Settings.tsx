@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS public.products (
   name TEXT NOT NULL,
   sku TEXT,
   category TEXT DEFAULT 'General',
+  size TEXT,
   price NUMERIC DEFAULT 0,
   cost NUMERIC DEFAULT 0, -- Purchase Price
   mrp NUMERIC DEFAULT 0,
@@ -129,6 +130,7 @@ CREATE TABLE IF NOT EXISTS public.stock_transactions (
   user_email TEXT,
   product_id TEXT,
   product_name TEXT,
+  product_size TEXT,
   type TEXT,
   quantity INTEGER,
   date DATE DEFAULT CURRENT_DATE,
@@ -148,10 +150,12 @@ ALTER TABLE public.payments DISABLE ROW LEVEL SECURITY;
 -- ADD MISSING COLUMNS TO EXISTING TABLES
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS size TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS product_size TEXT;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS user_email TEXT;
 
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS doctor_name TEXT;

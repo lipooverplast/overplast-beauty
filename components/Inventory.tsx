@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Product, UserRole, StockTransaction } from '../types';
 import { db } from '../db';
+import { ADMIN_EMAIL } from '../constants';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -15,9 +16,10 @@ interface InventoryProps {
   onUpdate: () => void;
   role: UserRole;
   userId?: string;
+  userEmail?: string;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, userId }) => {
+const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, userId, userEmail }) => {
   const [viewMode, setViewMode] = useState<'inventory' | 'history'>('inventory');
   const [searchTerm, setSearchTerm] = useState('');
   const [historySearch, setHistorySearch] = useState('');
@@ -118,25 +120,29 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     try {
       const updatedProduct = { ...editingProduct, stock: editingProduct.stock + restockQty };
       const transaction: StockTransaction = {
-        id: `tx-in-${Date.now()}`,
+        id: db.generateUUID(),
         productId: editingProduct.id,
         productName: editingProduct.name,
+        productSize: editingProduct.size,
         type: 'IN',
         quantity: restockQty,
         date: new Date().toISOString().split('T')[0],
         note: 'Manual Restock',
         createdBy: userId,
+        createdByName: userEmail
       };
 
-      await db.saveProducts([updatedProduct]);
-      await db.saveStockTransactions([transaction]);
+      await db.saveProducts([updatedProduct], userId, userEmail);
+      await db.saveStockTransactions([transaction], userId, userEmail);
       
-      onUpdate();
+      await onUpdate();
       setIsRestockModalOpen(false);
       setEditingProduct(null);
       setRestockQty(0);
+      alert("Stock restocked successfully!");
     } catch (err: any) {
-      alert("Restock failed: " + err.message);
+      console.error("Restock Error:", err);
+      alert("Restock failed: " + (err.message || "Unknown error"));
     } finally {
       setIsSaving(false);
     }
@@ -145,31 +151,41 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   const handleReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct || returnQty <= 0) return;
+    
+    if (returnQty > editingProduct.stock) {
+      alert(`Cannot return ${returnQty} units. Only ${editingProduct.stock} units available in stock.`);
+      return;
+    }
+
     setIsSaving(true);
 
     try {
       const updatedProduct = { ...editingProduct, stock: editingProduct.stock - returnQty };
       const transaction: StockTransaction = {
-        id: `tx-ret-${Date.now()}`,
+        id: db.generateUUID(),
         productId: editingProduct.id,
         productName: editingProduct.name,
+        productSize: editingProduct.size,
         type: 'RETURN',
         quantity: returnQty,
         date: new Date().toISOString().split('T')[0],
         note: returnNote || 'Stock Return',
         createdBy: userId,
+        createdByName: userEmail
       };
 
-      await db.saveProducts([updatedProduct]);
-      await db.saveStockTransactions([transaction]);
+      await db.saveProducts([updatedProduct], userId, userEmail);
+      await db.saveStockTransactions([transaction], userId, userEmail);
       
-      onUpdate();
+      await onUpdate();
       setIsReturnModalOpen(false);
       setEditingProduct(null);
       setReturnQty(0);
       setReturnNote('');
+      alert("Stock return processed successfully!");
     } catch (err: any) {
-      alert("Return failed: " + err.message);
+      console.error("Return Error:", err);
+      alert("Return failed: " + (err.message || "Unknown error"));
     } finally {
       setIsSaving(false);
     }
@@ -256,40 +272,50 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     // But we can just pass it to db.saveProducts and it will handle it if missing
     
     const productData: Product = {
-      id: editingProduct?.id || `prod-${Date.now()}`,
+      id: editingProduct?.id || db.generateUUID(),
       name: formData.get('name') as string,
       sku: formData.get('sku') as string,
       category: formData.get('category') as string,
-      price: tp, cost: purchasePrice, mrp: mrp, tp: tp, purchasePrice: purchasePrice,
+      size: formData.get('size') as string || '',
+      price: tp, 
+      cost: purchasePrice, 
+      mrp: mrp, 
+      tp: tp, 
+      purchasePrice: purchasePrice,
       stock: stock,
       minStock: parseInt(formData.get('minStock') as string) || 0,
       description: formData.get('description') as string || '',
       createdBy: editingProduct?.createdBy || userId,
-      // createdByName will be handled by db.saveProducts if we don't have it here
+      createdByName: editingProduct?.createdByName || userEmail,
+      createdAt: editingProduct?.createdAt || new Date().toISOString()
     };
 
     try {
-      await db.saveProducts([productData]);
+      await db.saveProducts([productData], userId, userEmail);
       
       if (isNewProduct && stock > 0) {
         const transaction: StockTransaction = {
-          id: `tx-init-${Date.now()}`,
+          id: db.generateUUID(),
           productId: productData.id,
           productName: productData.name,
+          productSize: productData.size,
           type: 'IN',
           quantity: stock,
           date: new Date().toISOString().split('T')[0],
           note: 'Initial Registration',
           createdBy: userId,
+          createdByName: userEmail,
         };
-        await db.saveStockTransactions([transaction]);
+        await db.saveStockTransactions([transaction], userId, userEmail);
       }
 
-      onUpdate();
+      await onUpdate();
       setIsModalOpen(false);
       setEditingProduct(null);
+      alert(isNewProduct ? "Product registered successfully!" : "Product updated successfully!");
     } catch (err: any) {
-      alert(`Operation failed: ${err.message}`);
+      console.error("Save Product Error:", err);
+      alert(`Operation failed: ${err.message || "Unknown error"}`);
     } finally {
       setIsSaving(false);
     }
@@ -419,6 +445,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 <tr className="bg-gray-50 text-gray-400 text-[9px] font-black uppercase tracking-[0.2em] border-b border-gray-200">
                   <th className="px-8 py-6">Product</th>
                   <th className="px-6 py-6">SKU</th>
+                  <th className="px-6 py-6">Size</th>
                   <th className="px-6 py-6 text-center">Price</th>
                   <th className="px-6 py-6">Stock</th>
                   <th className="px-6 py-6">Status</th>
@@ -429,20 +456,46 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 {filteredProducts.length > 0 ? filteredProducts.map((product) => {
                   const status = getStockStatus(product.stock || 0, product.minStock || 0);
                   const isDeleting = deletingId === product.id;
+                  const isAdminProduct = product.createdByName === ADMIN_EMAIL || !product.createdBy;
+                  const isOwner = product.createdBy === userId;
+                  // Staff can edit/delete their own products. Admin can do anything.
+                  const canModify = role === 'Admin' || isOwner;
+                  // All staff and admins can manage stock (restock/return) for any product
+                  const canManageStock = role === 'Admin' || role === 'Staff';
+
                   return (
                     <tr key={product.id} className="hover:bg-yellow-50/10 transition-colors group">
                       <td className="px-8 py-5">
                         <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 bg-gray-100 text-gray-400 rounded-xl flex items-center justify-center border border-gray-200 group-hover:bg-black group-hover:text-yellow-500 transition-all">
+                          <div className="w-10 h-10 bg-gray-100 text-gray-400 rounded-xl flex items-center justify-center border border-gray-200 group-hover:bg-black group-hover:text-yellow-500 transition-all relative">
                             <Package size={20} />
+                            {isAdminProduct && (
+                              <div className="absolute -top-2 -right-2 bg-black text-yellow-500 p-1 rounded-full border border-yellow-500/30 shadow-lg" title="Admin Registered Stock">
+                                <Shield size={10} strokeWidth={3} />
+                              </div>
+                            )}
                           </div>
                           <div>
-                            <p className="text-sm font-black text-gray-900">{product.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-black text-gray-900">{product.name}</p>
+                              {isAdminProduct && (
+                                <span className="px-2 py-0.5 bg-black text-yellow-500 text-[8px] font-black uppercase tracking-widest rounded-md border border-yellow-500/20">Global</span>
+                              )}
+                            </div>
                             <span className="text-[9px] font-black text-yellow-700 uppercase tracking-widest">{product.category}</span>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-5 text-[11px] font-black text-gray-400">{product.sku || 'N/A'}</td>
+                      <td className="px-6 py-5">
+                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                          product.size 
+                          ? 'bg-purple-50 border-purple-100 text-purple-600' 
+                          : 'bg-gray-50 border-gray-100 text-gray-400'
+                        }`}>
+                          {product.size || 'N/A'}
+                        </span>
+                      </td>
                       <td className="px-6 py-5 text-center">
                          <div className="text-sm font-black text-gray-900">Rs. {(product.mrp || 0).toFixed(2)}</div>
                          <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TP: Rs. {(product.tp || 0).toFixed(2)}</div>
@@ -458,8 +511,13 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                               </div>
                               <button 
                                 onClick={() => { setEditingProduct(product); setIsReturnModalOpen(true); }} 
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-100 text-amber-600 hover:bg-amber-100 rounded-lg transition-all shadow-sm ml-2" 
-                                title="Stock Return"
+                                disabled={!canManageStock}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all shadow-sm ml-2 ${
+                                  canManageStock 
+                                  ? 'bg-amber-50 border-amber-100 text-amber-600 hover:bg-amber-100' 
+                                  : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+                                }`}
+                                title={canManageStock ? "Stock Return" : "Read-only Asset"}
                               >
                                 <RefreshCw size={12} />
                                 <span className="text-[9px] font-black uppercase tracking-widest whitespace-nowrap">Stock Return</span>
@@ -476,21 +534,39 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                           <button onClick={() => viewItemHistory(product.name)} className="p-2.5 bg-blue-50 border border-blue-100 text-blue-600 hover:bg-blue-100 rounded-xl transition-all shadow-sm" title="Movement History">
                             <Clock size={16} />
                           </button>
-                          <button onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} className="p-2.5 bg-green-50 border border-green-100 text-green-600 hover:bg-green-100 rounded-xl transition-all shadow-sm" title="Restock Assets">
+                          <button 
+                            onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} 
+                            disabled={!canManageStock}
+                            className={`p-2.5 rounded-xl transition-all shadow-sm border ${
+                              canManageStock 
+                              ? 'bg-green-50 border-green-100 text-green-600 hover:bg-green-100' 
+                              : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+                            }`}
+                            title={canManageStock ? "Restock Assets" : "Read-only Asset"}
+                          >
                             <ArrowUpCircle size={16} />
                           </button>
-                          <button onClick={() => { setEditingProduct(product); setIsModalOpen(true); }} className="p-2.5 bg-white border border-gray-200 text-gray-400 hover:text-black rounded-xl transition-all shadow-sm" title="Edit Item">
+                          <button 
+                            onClick={() => { setEditingProduct(product); setIsModalOpen(true); }} 
+                            disabled={!canModify}
+                            className={`p-2.5 rounded-xl transition-all shadow-sm border ${
+                              canModify 
+                              ? 'bg-white border-gray-200 text-gray-400 hover:text-black' 
+                              : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+                            }`}
+                            title={canModify ? "Edit Item" : "Read-only Asset"}
+                          >
                             <Edit size={16} />
                           </button>
                           <button 
                             onClick={(e) => triggerDeleteConfirm(e, product)} 
-                            disabled={isDeleting}
+                            disabled={isDeleting || !canModify}
                             className={`p-2.5 rounded-xl transition-all shadow-sm border ${
-                              isDeleting 
+                              isDeleting || !canModify
                               ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
                               : 'bg-white border-red-100 text-red-500 hover:bg-red-500 hover:text-white'
                             }`} 
-                            title="Delete Permanently"
+                            title={canModify ? "Delete Permanently" : "Read-only Asset"}
                           >
                             {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                           </button>
@@ -576,6 +652,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                     <tr>
                       <th className="px-8 py-6">Date</th>
                       <th className="px-8 py-6">Item Identity</th>
+                      <th className="px-6 py-6 text-center">Size</th>
                       <th className="px-8 py-6 text-center">Movement Type</th>
                       <th className="px-8 py-6 text-right">Qty Flow</th>
                       <th className="px-8 py-6">Ledger Note</th>
@@ -599,6 +676,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                             </div>
                             <span className="text-sm font-black text-gray-900">{tx.productName}</span>
                           </div>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                            tx.productSize 
+                            ? 'bg-purple-50 border-purple-100 text-purple-600' 
+                            : 'bg-gray-50 border-gray-100 text-gray-400'
+                          }`}>
+                            {tx.productSize || 'N/A'}
+                          </span>
                         </td>
                         <td className="px-8 py-5 text-center">
                           <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
@@ -640,7 +726,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   {filteredTransactions.length > 0 && (
                     <tfoot className="bg-gray-50 border-t-2 border-gray-100">
                       <tr>
-                         <td colSpan={3} className="px-8 py-10 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Aggregate Flow Analysis</td>
+                         <td colSpan={4} className="px-8 py-10 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Aggregate Flow Analysis</td>
                          <td className="px-8 py-10 text-right">
                             <div className="space-y-1">
                                <p className="text-xs font-black text-green-600 uppercase tracking-widest">INBOUND: +{monthlyFlow.in}</p>
@@ -779,6 +865,25 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 <div className="md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Product Name</label><input required name="name" defaultValue={editingProduct?.name} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">SKU Identity</label><input required name="sku" defaultValue={editingProduct?.sku} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label><input required name="category" defaultValue={editingProduct?.category} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Size Option</label>
+                  <select 
+                    name="size" 
+                    defaultValue={editingProduct?.size || ''} 
+                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-black/5"
+                  >
+                    <option value="">No Size</option>
+                    <option value="Small">Small</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Large">Large</option>
+                    <option value="XL">XL</option>
+                    <option value="XXL">XXL</option>
+                    <option value="3XL">3XL</option>
+                    <option value="4XL">4XL</option>
+                    <option value="5XL">5XL</option>
+                    <option value="Cust">Cust</option>
+                  </select>
+                </div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label><input required type="number" step="0.01" name="mrp" defaultValue={editingProduct?.mrp} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-black" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label><input required type="number" step="0.01" name="tp" defaultValue={editingProduct?.tp} className="w-full px-5 py-4 bg-yellow-50/30 border border-yellow-100 rounded-2xl font-black" /></div>
                 <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label><input required type="number" step="0.01" name="purchasePrice" defaultValue={editingProduct?.purchasePrice} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" /></div>

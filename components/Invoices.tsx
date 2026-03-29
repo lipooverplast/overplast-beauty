@@ -34,6 +34,7 @@ const InvoiceLogo = () => (
           <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
           <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">Ph: +92 301 844 4449</p>
           <p className="text-[7px] font-bold text-gray-400 lowercase tracking-tight">Email: care@overplast.org</p>
+          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">NTN/GST: 2521812-3</p>
         </div>
     </div>
   </div>
@@ -46,11 +47,12 @@ interface InvoicesProps {
   onUpdate: () => void;
   role: UserRole;
   userId?: string;
+  userEmail?: string;
   initialClientId?: string | null;
   onClearInitialClient?: () => void;
 }
 
-const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpdate, role, userId, initialClientId, onClearInitialClient }) => {
+const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpdate, role, userId, userEmail, initialClientId, onClearInitialClient }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isParsingInvoice, setIsParsingInvoice] = useState(false);
@@ -61,6 +63,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [discountRate, setDiscountRate] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit'>('Cash');
   const [activeAssetId, setActiveAssetId] = useState(''); 
+  const [assetSearchTerm, setAssetSearchTerm] = useState('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
@@ -84,6 +87,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   useEffect(() => {
     if (isModalOpen) {
       setActiveAssetId('');
+      setAssetSearchTerm('');
     }
   }, [isModalOpen]);
 
@@ -115,6 +119,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       setSelectedItems([...selectedItems, {
         productId: product.id,
         name: product.name,
+        size: product.size,
         quantity: 1,
         price: tp,
         mrp: mrp,
@@ -192,7 +197,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
     setIsCreating(true);
     const newInvoice: Invoice = {
-      id: `inv-${Date.now()}`,
+      id: db.generateUUID(),
       invoiceNumber: `OVI-${Math.floor(Math.random() * 90000) + 10000}`,
       clientId: client.id,
       clientName: client.name,
@@ -208,6 +213,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       paymentMethod: paymentMethod,
       paidAmount: paymentMethod === 'Cash' ? grandTotal : 0,
       createdBy: userId,
+      createdByName: userEmail
     };
 
     try {
@@ -225,7 +231,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         
         // Create stock transactions for the activity log
         const transactions: StockTransaction[] = selectedItems.map(item => ({
-          id: `tx-out-${Date.now()}-${item.productId}`,
+          id: db.generateUUID(),
           productId: item.productId,
           productName: item.name,
           type: 'OUT',
@@ -233,6 +239,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
           date: new Date().toISOString().split('T')[0],
           note: `Invoice #${newInvoice.invoiceNumber}`,
           createdBy: userId,
+          createdByName: userEmail
         }));
         await db.saveStockTransactions(transactions);
       }
@@ -242,9 +249,10 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       setSelectedItems([]);
       setSelectedClientId('');
       setActiveAssetId('');
+      alert("Statement committed successfully. Stock updated.");
     } catch (err: any) {
-      console.error(err);
-      alert("Failed to save invoice: " + err.message);
+      console.error("Invoice Creation Error:", err);
+      alert("Failed to save invoice: " + (err.message || "Connectivity error. Try again."));
     } finally {
       setIsCreating(false);
     }
@@ -370,25 +378,101 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     }
 
     try {
-      await new Promise(r => setTimeout(r, 300));
+      // Wait for any animations or rendering to complete
+      await new Promise(r => setTimeout(r, 800));
+      
       const canvas = await html2canvas(element, { 
-        scale: 2, 
+        scale: 3, // Higher scale for better quality
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
-        windowWidth: 1000 
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+        windowWidth: 1200, // Fixed window width to ensure consistent layout
+        onclone: (clonedDoc) => {
+          const clonedElement = clonedDoc.getElementById('printable-invoice-area');
+          if (clonedElement) {
+            // Force the element to be fully expanded and visible
+            clonedElement.style.overflow = 'visible';
+            clonedElement.style.maxHeight = 'none';
+            clonedElement.style.height = 'auto';
+            clonedElement.style.padding = '60px'; // More padding for PDF margins
+            clonedElement.style.width = '1100px'; // Fixed width for capture
+            clonedElement.style.margin = '0';
+            clonedElement.style.boxSizing = 'border-box';
+            clonedElement.style.transform = 'none';
+            
+            // Fix grid layouts which html2canvas sometimes struggles with
+            const gridElements = clonedElement.querySelectorAll('.grid');
+            gridElements.forEach(el => {
+              const htmlEl = el as HTMLElement;
+              if (htmlEl.classList.contains('grid-cols-2')) {
+                htmlEl.style.display = 'flex';
+                htmlEl.style.flexDirection = 'row';
+                htmlEl.style.justifyContent = 'space-between';
+                htmlEl.style.gap = '40px';
+                Array.from(htmlEl.children).forEach(child => {
+                  (child as HTMLElement).style.flex = '1';
+                });
+              }
+            });
+
+            // Ensure tables are fully rendered and not cut
+            const tables = clonedElement.querySelectorAll('table');
+            tables.forEach(table => {
+              (table as HTMLElement).style.width = '100%';
+              (table as HTMLElement).style.tableLayout = 'fixed';
+              (table as HTMLElement).style.borderCollapse = 'collapse';
+            });
+
+            // Ensure all text is visible and remove any animations
+            const allElements = clonedElement.querySelectorAll('*');
+            allElements.forEach(el => {
+              const htmlEl = el as HTMLElement;
+              htmlEl.style.animation = 'none';
+              htmlEl.style.transition = 'none';
+              const style = window.getComputedStyle(el);
+              if (style.opacity === '0') {
+                htmlEl.style.opacity = '1';
+              }
+            });
+          }
+        }
       });
       
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const imgData = canvas.toDataURL('image/png', 1.0);
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
       
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      // Add first page
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+      heightLeft -= pdfHeight;
+
+      // Add subsequent pages if content is long
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+        heightLeft -= pdfHeight;
+      }
+
       pdf.save(`Overplast_Invoice_${viewingInvoice.invoiceNumber}.pdf`);
     } catch (err) {
-      console.error(err);
-      alert("PDF Generation Failed.");
+      console.error("PDF Export Error:", err);
+      alert("PDF Generation Failed. Please try again.");
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -539,12 +623,12 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
       {/* Create Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-6xl rounded-[3rem] overflow-hidden flex flex-col max-h-[95vh] shadow-2xl animate-in zoom-in-95">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white w-full max-w-6xl rounded-[3rem] overflow-hidden flex flex-col max-h-[85vh] shadow-2xl animate-in zoom-in-95 my-auto">
             <div className="p-8 border-b flex justify-between items-center bg-gray-50/50">
               <div className="flex items-center gap-4">
                  <div className="p-3 bg-black text-yellow-500 rounded-2xl shadow-lg"><FileText size={24} /></div>
-                 <h3 className="text-xl font-black uppercase tracking-widest">Generate Beauty Statement</h3>
+                 <h3 className="text-3xl font-black uppercase tracking-tighter">Statement</h3>
               </div>
               <div className="flex bg-gray-200 p-1.5 rounded-2xl border border-gray-300">
                 <button onClick={() => setPaymentMethod('Cash')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'Cash' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Cash</button>
@@ -570,7 +654,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Asset Select</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Asset Select</label>
+                    <div className="relative group">
+                      <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-yellow-500 transition-colors" />
+                      <input 
+                        type="text" 
+                        placeholder="Find asset..." 
+                        value={assetSearchTerm} 
+                        onChange={e => setAssetSearchTerm(e.target.value)}
+                        className="pl-6 pr-2 py-1.5 bg-white border border-gray-200 rounded-lg text-[10px] font-bold outline-none focus:ring-2 focus:ring-yellow-400 w-28 transition-all"
+                      />
+                    </div>
+                  </div>
                   <select 
                     value={activeAssetId} 
                     onChange={e => { 
@@ -581,7 +677,12 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     className="w-full p-5 bg-yellow-50 text-yellow-800 border-yellow-200 border rounded-[1.25rem] font-black text-xs outline-none"
                   >
                     <option value="">+ SELECT ASSET...</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock})</option>)}
+                    {products
+                      .filter(p => 
+                        p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
+                        p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
+                      )
+                      .map(p => <option key={p.id} value={p.id}>{p.name} {p.size ? `(${p.size})` : ''}</option>)}
                   </select>
                 </div>
                 <div>
@@ -599,6 +700,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   <thead className="bg-gray-50 text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] border-b">
                     <tr>
                       <th className="px-8 py-6">Asset Description</th>
+                      <th className="px-6 py-6 text-center">Size</th>
                       <th className="px-6 py-6 text-center">MRP</th>
                       <th className="px-6 py-6 text-center">Trade Price</th>
                       <th className="px-6 py-6 text-center">Qty</th>
@@ -612,6 +714,15 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         <td className="px-8 py-5">
                           <p className="font-black text-gray-900">{item.name}</p>
                           <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold">Ref: {item.productId.slice(-4)}</p>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                            item.size 
+                            ? 'bg-purple-50 border-purple-100 text-purple-600' 
+                            : 'bg-gray-50 border-gray-100 text-gray-400'
+                          }`}>
+                            {item.size || 'N/A'}
+                          </span>
                         </td>
                         <td className="px-6 py-5 text-center text-xs font-bold text-gray-400 line-through">Rs. {item.mrp}</td>
                         <td className="px-6 py-5 text-center">
@@ -670,7 +781,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       {/* Detail View Modal */}
       {viewingInvoice && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto no-print">
-          <div className="bg-white w-full max-w-5xl max-h-[95vh] rounded-[3rem] overflow-hidden flex flex-col shadow-2xl my-auto animate-in zoom-in-95 duration-200">
+          <div className="bg-white w-full max-w-5xl max-h-[85vh] rounded-[3rem] overflow-hidden flex flex-col shadow-2xl my-auto animate-in zoom-in-95 duration-200">
             <div className="p-8 border-b flex justify-between items-center bg-gray-50/50 sticky top-0 z-10 no-print border-gray-100">
               <div className="flex items-center gap-4">
                  <FileText size={20} className="text-yellow-500" />
@@ -761,6 +872,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   <thead>
                     <tr className="border-b-4 border-black">
                       <th className="py-6 text-left text-[11px] font-black uppercase tracking-widest">Item Description</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Size</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">MRP</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Trade Price</th>
@@ -773,6 +885,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         <td className="py-6">
                           <p className="font-black text-gray-900">{item.name}</p>
                         </td>
+                        <td className="py-6 text-center font-black text-gray-900">{item.size || 'N/A'}</td>
                         <td className="py-6 text-center font-black text-gray-900">{item.quantity}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.mrp}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.tp}</td>
@@ -782,24 +895,24 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   </tbody>
                   <tfoot>
                     <tr className="border-t-4 border-black">
-                      <td colSpan={3}></td>
+                      <td colSpan={4}></td>
                       <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Subtotal</td>
                       <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {(viewingInvoice.subtotal || 0).toLocaleString()}</td>
                     </tr>
                     {viewingInvoice.discountTotal > 0 && (
                       <tr>
-                        <td colSpan={3}></td>
+                        <td colSpan={4}></td>
                         <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Discount ({viewingInvoice.discountRate}%)</td>
                         <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingInvoice.discountTotal || 0).toLocaleString()}</td>
                       </tr>
                     )}
                     <tr>
-                      <td colSpan={3}></td>
+                      <td colSpan={4}></td>
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingInvoice.taxRate}%)</td>
                       <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingInvoice.taxTotal || 0).toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td colSpan={3}></td>
+                      <td colSpan={4}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
                       <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {(viewingInvoice.total || 0).toLocaleString()}</td>
                     </tr>

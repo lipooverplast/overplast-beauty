@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Package, FileText, Users, Settings, ChevronRight, X, Repeat,
-  PanelLeftClose, PanelLeft, Loader2, CloudOff, Database, Cloud, LogOut, AlertCircle, RefreshCw, CheckCircle, Sparkles, UserCheck, Shield, Ban, UserRoundSearch, Star, Crown, Fingerprint, DatabaseZap
+  PanelLeftClose, PanelLeft, Loader2, CloudOff, Database, Cloud, LogOut, AlertCircle, RefreshCw, CheckCircle, Sparkles, UserCheck, Shield, Ban, UserRoundSearch, Star, Crown, Fingerprint, DatabaseZap, Zap
 } from 'lucide-react';
 import { ViewType, Product, Client, Invoice, Profile, UserRole } from './types';
 import { db } from './db';
@@ -16,7 +16,7 @@ import AdminOffice from './components/AdminOffice';
 import SettingsView from './components/Settings';
 import Auth from './components/Auth';
 
-import { APP_LOGO_URL, APP_NAME } from './constants';
+import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from './constants';
 
 const AppLogo = ({ className = "" }: { className?: string }) => (
   <img 
@@ -47,52 +47,127 @@ const App: React.FC = () => {
   const [preselectedClientId, setPreselectedClientId] = useState<string | null>(null);
 
   useEffect(() => {
+    // Global error listener for Supabase refresh token errors and network failures
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const error = event.reason;
+      const errorMsg = String(error?.message || error || '').toLowerCase();
+      
+      if (errorMsg.includes('refresh token') || errorMsg.includes('refresh_token_not_found')) {
+        console.warn("Auth: Global refresh token error detected. Signing out.");
+        if (supabase) {
+          supabase.auth.signOut().then(() => {
+            setUser(null);
+            setIsLoading(false);
+          }).catch(() => {
+            setUser(null);
+            setIsLoading(false);
+          });
+          // Clear local storage as a last resort
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.includes('supabase.auth.token')) {
+              localStorage.removeItem(key);
+            }
+          }
+        }
+      } else if (errorMsg.includes('fetch') || errorMsg.includes('network')) {
+        // Ignore errors that should be silenced (like MetaMask or background fetches)
+        const silencePatterns = ['metamask', 'ethereum', 'web3', 'rpc', 'provider', 'wallet', 'failed to connect to metamask'];
+        if (silencePatterns.some(p => errorMsg.includes(p))) {
+          return;
+        }
+        
+        // Only set dbError if it's not a silenced pattern
+        setDbError(true);
+      }
+    };
+
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
     if (isSupabaseConfigured && supabase) {
       supabase.auth.getSession().then(({ data: { session }, error }: any) => {
-        if (error && error.message.includes('Refresh Token')) {
+        if (error && (
+          error.message.includes('Refresh Token') || 
+          error.message.includes('refresh_token_not_found') || 
+          error.message.includes('Invalid Refresh Token')
+        )) {
           console.warn("Auth: Invalid refresh token detected. Clearing session.");
-          supabase.auth.signOut();
-          setUser(null);
+          supabase.auth.signOut().then(() => {
+            setUser(null);
+            setIsLoading(false);
+          });
+          // Clear local storage as a last resort
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.includes('supabase.auth.token')) {
+              localStorage.removeItem(key);
+            }
+          }
         } else {
           setUser(session?.user ?? null);
         }
       }).catch((err: any) => {
         console.error("Auth: Session fetch failed", err);
-        setUser(null);
+        if (err.message?.includes('Refresh Token') || err.message?.includes('refresh_token_not_found') || err.message?.includes('Invalid Refresh Token')) {
+          supabase.auth.signOut().then(() => {
+            setUser(null);
+            setIsLoading(false);
+          });
+        } else {
+          setUser(null);
+        }
       });
 
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
-        setUser(session?.user ?? null);
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event: any, session: any) => {
+        console.log("Auth State Change:", event);
+        if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+          setUser(null);
+        } else if (session) {
+          setUser(session.user);
+        } else {
+          setUser(null);
+        }
       });
-      return () => subscription.unsubscribe();
+
+      return () => {
+        subscription.unsubscribe();
+        window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      };
     } else {
       setIsLoading(false);
       refreshData();
+      return () => {
+        window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      };
     }
   }, []);
 
-  useEffect(() => {
-    const fetchInitialData = async () => {
-      if (user && isSupabaseConfigured) {
-        setIsProfileLoading(true);
-        setDbError(false);
-        try {
-          const p = await db.getProfile(user.id) || await db.ensureProfile(user);
-          if (!p) setDbError(true);
-          setProfile(p);
-          refreshData(false, p);
-        } catch (e) {
-          console.error("Init Data Fetch Error:", e);
+  const fetchInitialData = async () => {
+    if (user && isSupabaseConfigured) {
+      setIsProfileLoading(true);
+      setDbError(false);
+      try {
+        const p = await db.getProfile(user.id) || await db.ensureProfile(user);
+        if (!p) setDbError(true);
+        setProfile(p);
+        refreshData(false, p);
+      } catch (e: any) {
+        console.error("Init Data Fetch Error:", e);
+        const errorMsg = String(e?.message || e || '').toLowerCase();
+        if (errorMsg.includes('fetch') || errorMsg.includes('network')) {
           setDbError(true);
-          refreshData();
-        } finally {
-          setIsProfileLoading(false);
         }
-      } else {
-        setProfile(null);
         refreshData();
+      } finally {
+        setIsProfileLoading(false);
       }
-    };
+    } else {
+      setProfile(null);
+      refreshData();
+    }
+  };
+
+  useEffect(() => {
     fetchInitialData();
   }, [user]);
 
@@ -109,11 +184,11 @@ const App: React.FC = () => {
       const isAdmin = !isSupabaseConfigured || 
                       currentProfile?.role === 'Admin' || 
                       currentProfile?.role === 'admin' || 
-                      user?.email === 'mtq16277@gmail.com';
+                      user?.email === ADMIN_EMAIL;
       const filterId = isAdmin ? undefined : user?.id;
 
       const [p, c, i] = await Promise.all([
-        db.getProducts(filterId),
+        db.getProducts(undefined), // Allow all users to see all products
         db.getClients(filterId),
         db.getInvoices(filterId)
       ]);
@@ -138,7 +213,7 @@ const App: React.FC = () => {
     setActiveView('invoices');
   };
 
-  const isAdmin = !isSupabaseConfigured || profile?.role === 'Admin';
+  const isAdmin = !isSupabaseConfigured || profile?.role === 'Admin' || user?.email === ADMIN_EMAIL;
   const effectiveRole = isAdmin ? 'Admin' : 'Staff';
 
   if (profile?.status === 'Suspended') {
@@ -188,6 +263,25 @@ const App: React.FC = () => {
                      <p className="text-xs text-red-900">Ensure your <span className="font-bold">VITE_SUPABASE_URL</span> and <span className="font-bold">VITE_SUPABASE_ANON_KEY</span> are correctly set in your environment variables.</p>
                    </div>
                  </div>
+                 <div className="flex flex-col sm:flex-row gap-4 mt-8">
+                    <button 
+                      onClick={() => window.location.reload()}
+                      className="px-6 py-3 bg-black text-white rounded-xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all flex items-center justify-center gap-3 text-[10px]"
+                    >
+                      <RefreshCw size={14} />
+                      Reload App
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setDbError(false);
+                        fetchInitialData();
+                      }}
+                      className="px-6 py-3 bg-gray-100 text-gray-900 rounded-xl font-black uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center justify-center gap-3 text-[10px]"
+                    >
+                      <Zap size={14} />
+                      Retry Connection
+                    </button>
+                  </div>
                  <p className="text-red-800 text-[10px] font-black uppercase tracking-widest mt-6">Click the refresh icon in the sidebar after fixing.</p>
                </div>
              </div>
@@ -196,8 +290,8 @@ const App: React.FC = () => {
         <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />
       </div>
     ),
-    inventory: <Inventory products={products} onUpdate={refreshData} role={effectiveRole} userId={user?.id} />,
-    invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
+    inventory: <Inventory products={products} onUpdate={refreshData} role={effectiveRole} userId={user?.id} userEmail={user?.email} />,
+    invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} userEmail={user?.email} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
     recurring: <RecurringInvoices products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} />,
     clients: <Clients clients={clients} invoices={invoices} onUpdate={refreshData} onCreateInvoice={handleCreateInvoiceForClient} role={effectiveRole} userId={user?.id} />,
     'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} userEmail={user?.email} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
@@ -318,7 +412,7 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="p-6 md:p-10 w-full flex-1 overflow-y-auto relative z-10">
+        <div className="p-6 md:p-10 w-full flex-1 overflow-y-auto relative">
           <div className="w-full max-w-[1600px] mx-auto">
             {ActiveComponent}
           </div>

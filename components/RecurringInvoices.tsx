@@ -56,6 +56,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
   const [discountRate, setDiscountRate] = useState(0);
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [activeAssetId, setActiveAssetId] = useState('');
+  const [assetSearchTerm, setAssetSearchTerm] = useState('');
   
   // Detail & Export State
   const [viewingRecurring, setViewingRecurring] = useState<RecurringInvoice | null>(null);
@@ -74,6 +75,13 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
     setRecurringInvoices(data || []);
   };
 
+  useEffect(() => {
+    if (isModalOpen) {
+      setActiveAssetId('');
+      setAssetSearchTerm('');
+    }
+  }, [isModalOpen]);
+
   const calculateSubtotal = () => selectedItems.reduce((sum, item) => sum + item.total, 0);
 
   const addItem = (productId: string) => {
@@ -91,6 +99,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
       setSelectedItems([...selectedItems, {
         productId: product.id,
         name: product.name,
+        size: product.size,
         quantity: 1,
         price: tp,
         mrp: mrp,
@@ -466,18 +475,35 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
               <div className="space-y-4">
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="font-black text-gray-900 uppercase text-[11px] tracking-[0.2em]">Asset Composition</h4>
-                  <select 
-                    value={activeAssetId}
-                    onChange={(e) => { 
-                      const val = e.target.value;
-                      setActiveAssetId(val);
-                      if(val) addItem(val); 
-                    }}
-                    className="px-6 py-3 bg-indigo-600 text-white text-[10px] font-black rounded-xl outline-none border-none shadow-lg uppercase tracking-widest hover:bg-indigo-700 transition-all cursor-pointer"
-                  >
-                    <option value="">+ SELECT ASSET TO TEMPLATE</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name} (Rs. {p.tp})</option>)}
-                  </select>
+                  <div className="flex items-center gap-3">
+                    <div className="relative group">
+                      <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+                      <input 
+                        type="text" 
+                        placeholder="Search assets..." 
+                        value={assetSearchTerm} 
+                        onChange={e => setAssetSearchTerm(e.target.value)}
+                        className="pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[10px] font-bold outline-none focus:ring-4 focus:ring-indigo-50 w-40 transition-all"
+                      />
+                    </div>
+                    <select 
+                      value={activeAssetId}
+                      onChange={(e) => { 
+                        const val = e.target.value;
+                        setActiveAssetId(val);
+                        if(val) addItem(val); 
+                      }}
+                      className="px-6 py-3 bg-indigo-600 text-white text-[10px] font-black rounded-xl outline-none border-none shadow-lg uppercase tracking-widest hover:bg-indigo-700 transition-all cursor-pointer"
+                    >
+                      <option value="">+ SELECT ASSET TO TEMPLATE</option>
+                      {products
+                        .filter(p => 
+                          p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
+                          p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
+                        )
+                        .map(p => <option key={p.id} value={p.id}>{p.name} {p.size ? `(${p.size})` : ''} (Rs. {p.tp})</option>)}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="border border-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl bg-white">
@@ -486,6 +512,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                       <thead className="bg-gray-50 text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] border-b border-gray-100">
                         <tr>
                           <th className="px-8 py-6">Item Description</th>
+                          <th className="px-6 py-6 text-center">Size</th>
                           <th className="px-6 py-6 text-center">Quantity</th>
                           <th className="px-6 py-6 text-center">MRP</th>
                           <th className="px-6 py-6 text-center">Trade Price</th>
@@ -499,6 +526,15 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                             <td className="px-8 py-5">
                                <p className="text-sm font-black text-gray-900">{item.name}</p>
                                <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest italic">Fixed Recurring Item</p>
+                            </td>
+                            <td className="px-6 py-5 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                                item.size 
+                                ? 'bg-purple-50 border-purple-100 text-purple-600' 
+                                : 'bg-gray-50 border-gray-100 text-gray-400'
+                              }`}>
+                                {item.size || 'N/A'}
+                              </span>
                             </td>
                             <td className="px-6 py-5">
                               <div className="flex justify-center">

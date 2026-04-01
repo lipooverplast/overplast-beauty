@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   paid_amount NUMERIC DEFAULT 0,
   status TEXT DEFAULT 'Pending',
   payment_method TEXT DEFAULT 'Cash',
+  sales_person TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS public.recurring_invoices (
   next_run_date DATE DEFAULT CURRENT_DATE,
   status TEXT DEFAULT 'Active',
   last_generated_date DATE,
+  sales_person TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -153,7 +155,9 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS size TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS sales_person TEXT;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS sales_person TEXT;
 ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS product_size TEXT;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS user_email TEXT;

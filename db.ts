@@ -383,6 +383,7 @@ export const db = {
           status: inv.status, 
           paymentMethod: inv.payment_method || 'Cash',
           paidAmount: Number(inv.paid_amount || 0),
+          salesPerson: inv.sales_person || '',
           createdBy: inv.user_id,
           createdByName: inv.user_email,
           createdAt: inv.created_at
@@ -428,14 +429,15 @@ export const db = {
           tax_rate: inv.taxRate,
           tax_total: inv.taxTotal, total: inv.total, status: inv.status, 
           payment_method: inv.paymentMethod || 'Cash',
-          paid_amount: inv.paidAmount || 0
+          paid_amount: inv.paidAmount || 0,
+          sales_person: inv.salesPerson || ''
         };
         return row;
       });
       const { error } = await withRetry(() => supabase.from('invoices').upsert(dbRows));
       if (error) {
         if (error.code === '42703' || error.message.includes('column')) {
-          throw new Error("Missing 'discount' or 'tax' columns in 'invoices' table. Please run the Repair Script in Settings.");
+          throw new Error("Missing 'discount', 'tax', or 'sales_person' columns in 'invoices' table. Please run the Repair Script in Settings.");
         }
         throw new Error(error.message);
       }
@@ -782,6 +784,47 @@ export const db = {
     if (idx > -1) existing[idx] = payment;
     else existing.push(payment);
     localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(existing));
+  },
+
+  returnInvoice: async (invoice: Invoice, userId?: string, userEmail?: string) => {
+    if (invoice.status === 'Returned') return;
+
+    // 1. Update Invoice Status
+    const updatedInvoice = { ...invoice, status: 'Returned' as const };
+    await db.saveInvoices([updatedInvoice]);
+
+    // 2. Update Product Stocks and Create Transactions
+    const products = await db.getProducts();
+    const stockTransactions: StockTransaction[] = [];
+    const productsToUpdate: Product[] = [];
+
+    for (const item of invoice.items) {
+      const product = products.find(p => p.id === item.productId);
+      if (product) {
+        product.stock += item.quantity;
+        productsToUpdate.push(product);
+
+        stockTransactions.push({
+          id: generateUUID(),
+          productId: item.productId,
+          productName: item.name,
+          productSize: item.size,
+          type: 'RETURN',
+          quantity: item.quantity,
+          date: new Date().toISOString().split('T')[0],
+          note: `Return from Invoice #${invoice.invoiceNumber}`,
+          createdBy: userId,
+          createdByName: userEmail
+        });
+      }
+    }
+
+    if (productsToUpdate.length > 0) {
+      await db.saveProducts(productsToUpdate, userId, userEmail);
+    }
+    if (stockTransactions.length > 0) {
+      await db.saveStockTransactions(stockTransactions, userId, userEmail);
+    }
   },
 
   exportDatabase: async (userId?: string) => {

@@ -4,13 +4,13 @@ import {
   Plus, Search, FileText, CheckCircle, Clock, X, Eye, 
   Trash2, Loader2, Printer, Download, AlertCircle, 
   Sparkles, Upload, ArrowRight, Wallet, Banknote, 
-  CreditCard, ChevronDown, Percent, Info, Shield, MapPin, Phone, AlertTriangle
+  CreditCard, ChevronDown, Percent, Info, Shield, MapPin, Phone, AlertTriangle, RotateCcw
 } from 'lucide-react';
 import { Invoice, Product, Client, InvoiceItem, UserRole, Payment, StockTransaction } from '../types';
 import { db } from '../db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import { APP_LOGO_URL, APP_NAME } from '../constants';
+import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from '../constants';
 import { geminiService } from '../geminiService';
 
 const InvoiceLogo = () => (
@@ -61,19 +61,29 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [selectedClientId, setSelectedClientId] = useState('');
   const [taxRate, setTaxRate] = useState(0);
   const [discountRate, setDiscountRate] = useState(0);
+  const [salesPerson, setSalesPerson] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit'>('Cash');
   const [activeAssetId, setActiveAssetId] = useState(''); 
   const [assetSearchTerm, setAssetSearchTerm] = useState('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const [isReturning, setIsReturning] = useState(false);
+  const [showReturnConfirm, setShowReturnConfirm] = useState(false);
+  const [invoiceToReturn, setInvoiceToReturn] = useState<Invoice | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentNote, setPaymentNote] = useState('');
+  const [searchSalesPerson, setSearchSalesPerson] = useState('');
   
   // Deletion State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  
+  const filteredProducts = React.useMemo(() => {
+    if (role === 'Admin') return products;
+    return products.filter(p => p.createdBy === userId);
+  }, [products, role, userId]);
 
   useEffect(() => {
     if (initialClientId) {
@@ -82,6 +92,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       onClearInitialClient?.();
     }
   }, [initialClientId]);
+
+  const filteredInvoices = React.useMemo(() => {
+    return invoices.filter(inv => {
+      const matchesSalesPerson = (inv.salesPerson || '').toLowerCase().includes(searchSalesPerson.toLowerCase()) ||
+                                (inv.createdByName || '').toLowerCase().includes(searchSalesPerson.toLowerCase());
+      return matchesSalesPerson;
+    });
+  }, [invoices, searchSalesPerson]);
 
   // Reset dropdown when modal opens/closes
   useEffect(() => {
@@ -96,14 +114,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     return parseFloat((((mrp - tp) / mrp) * 100).toFixed(1));
   };
 
-  const calculateSubtotal = () => selectedItems.reduce((sum, item) => sum + item.total, 0);
-  const subtotal = calculateSubtotal();
-  const discountTotal = subtotal * (discountRate / 100);
-  const taxTotal = (subtotal - discountTotal) * (taxRate / 100);
-  const grandTotal = subtotal - discountTotal + taxTotal;
+  const calculateSubtotal = () => selectedItems.reduce((sum, item) => sum + (item.tp * item.quantity), 0);
+  const grossSubtotal = calculateSubtotal();
+  const totalItemDiscount = selectedItems.reduce((sum, item) => sum + ((item.tp * (item.discount / 100)) * item.quantity), 0);
+  const netBeforeGlobal = grossSubtotal - totalItemDiscount;
+  const globalDiscountAmount = netBeforeGlobal * (discountRate / 100);
+  
+  const subtotal = grossSubtotal;
+  const discountTotal = totalItemDiscount + globalDiscountAmount;
+  const taxTotal = (grossSubtotal - discountTotal) * (taxRate / 100);
+  const grandTotal = grossSubtotal - discountTotal + taxTotal;
 
   const addItem = (productId: string) => {
-    const product = products.find(p => p.id === productId);
+    const product = filteredProducts.find(p => p.id === productId);
     if (!product) return;
     if (product.stock <= 0) { 
       alert("No stock available for this asset."); 
@@ -124,7 +147,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         price: tp,
         mrp: mrp,
         tp: tp,
-        discount: calcDiscount(mrp, tp),
+        discount: 0,
         total: tp
       }]);
     }
@@ -133,9 +156,11 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const updateItem = (productId: string, updates: Partial<InvoiceItem>) => {
     setSelectedItems(prev => prev.map(item => {
       if (item.productId !== productId) return item;
-      const newItem = { ...item, ...updates };
-      newItem.total = newItem.tp * (newItem.quantity || 0);
-      newItem.discount = calcDiscount(newItem.mrp, newItem.tp);
+      let newItem = { ...item, ...updates };
+      
+      const unitPriceAfterDiscount = newItem.tp * (1 - (newItem.discount || 0) / 100);
+      newItem.price = unitPriceAfterDiscount;
+      newItem.total = unitPriceAfterDiscount * (newItem.quantity || 0);
       return newItem;
     }));
   };
@@ -162,7 +187,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         if (parsedData.items && parsedData.items.length > 0) {
           const newItems: InvoiceItem[] = [];
           for (const item of parsedData.items) {
-            const product = products.find(p => p.name.toLowerCase().includes(item.name.toLowerCase()));
+            const product = filteredProducts.find(p => p.name.toLowerCase().includes(item.name.toLowerCase()));
             if (product) {
               const discount = calcDiscount(product.mrp, product.tp);
               newItems.push({
@@ -172,7 +197,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 price: product.tp,
                 mrp: product.mrp,
                 tp: product.tp,
-                discount: discount,
+                discount: calcDiscount(product.mrp, product.tp),
                 total: product.tp * (item.quantity || 1)
               });
             }
@@ -212,6 +237,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       status: paymentMethod === 'Cash' ? 'Paid' : 'Pending',
       paymentMethod: paymentMethod,
       paidAmount: paymentMethod === 'Cash' ? grandTotal : 0,
+      salesPerson: salesPerson,
       createdBy: userId,
       createdByName: userEmail
     };
@@ -219,7 +245,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     try {
       await db.saveInvoices([newInvoice]);
       
-      const updatedProductEntries = products
+      const updatedProductEntries = filteredProducts
         .filter(p => selectedItems.some(item => item.productId === p.id))
         .map(p => {
           const soldItem = selectedItems.find(item => item.productId === p.id);
@@ -249,6 +275,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       setSelectedItems([]);
       setSelectedClientId('');
       setActiveAssetId('');
+      setSalesPerson('');
       alert("Statement committed successfully. Stock updated.");
     } catch (err: any) {
       console.error("Invoice Creation Error:", err);
@@ -367,6 +394,35 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     }
   };
 
+  const handleReturnInvoice = (invoice: Invoice) => {
+    if (invoice.status === 'Returned') return;
+    setInvoiceToReturn(invoice);
+    setShowReturnConfirm(true);
+  };
+
+  const confirmReturnInvoice = async () => {
+    if (!invoiceToReturn) return;
+
+    setIsReturning(true);
+    try {
+      await db.returnInvoice(invoiceToReturn, userId, userEmail);
+      
+      if (viewingInvoice?.id === invoiceToReturn.id) {
+        setViewingInvoice({ ...invoiceToReturn, status: 'Returned' });
+      }
+      
+      onUpdate();
+      setShowReturnConfirm(false);
+      setInvoiceToReturn(null);
+    } catch (err: any) {
+      console.error("Return Invoice Error:", err);
+      // Still using alert here for errors, but the main interaction is now modal-based.
+      alert("Failed to return invoice: " + (err.message || "Unknown error"));
+    } finally {
+      setIsReturning(false);
+    }
+  };
+
   const exportToPdf = async () => {
     if (!viewingInvoice) return;
     setIsGeneratingPdf(true);
@@ -379,15 +435,13 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
     try {
       // Wait for any animations or rendering to complete
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 500));
       
       const canvas = await html2canvas(element, { 
-        scale: 3, // Higher scale for better quality
+        scale: 2, // 2 is usually enough for good quality and better performance
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
-        width: element.scrollWidth,
-        height: element.scrollHeight,
         windowWidth: 1200, // Fixed window width to ensure consistent layout
         onclone: (clonedDoc) => {
           const clonedElement = clonedDoc.getElementById('printable-invoice-area');
@@ -396,11 +450,12 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
             clonedElement.style.overflow = 'visible';
             clonedElement.style.maxHeight = 'none';
             clonedElement.style.height = 'auto';
-            clonedElement.style.padding = '60px'; // More padding for PDF margins
-            clonedElement.style.width = '1100px'; // Fixed width for capture
+            clonedElement.style.padding = '40px'; 
+            clonedElement.style.width = '1000px'; 
             clonedElement.style.margin = '0';
             clonedElement.style.boxSizing = 'border-box';
             clonedElement.style.transform = 'none';
+            clonedElement.style.display = 'block';
             
             // Fix grid layouts which html2canvas sometimes struggles with
             const gridElements = clonedElement.querySelectorAll('.grid');
@@ -423,6 +478,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
               (table as HTMLElement).style.width = '100%';
               (table as HTMLElement).style.tableLayout = 'fixed';
               (table as HTMLElement).style.borderCollapse = 'collapse';
+              (table as HTMLElement).style.overflow = 'visible';
             });
 
             // Ensure all text is visible and remove any animations
@@ -479,7 +535,61 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   };
 
   const handlePrint = () => {
-    window.print();
+    const printArea = document.getElementById('printable-invoice-area');
+    if (!printArea) {
+      alert("Error: Print area not found.");
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Please allow popups to print.");
+      return;
+    }
+
+    const content = printArea.innerHTML;
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map(style => style.outerHTML)
+      .join('\n');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Print Invoice - ${viewingInvoice?.invoiceNumber || 'Invoice'}</title>
+          ${styles}
+          <style>
+            body { 
+              background: white !important; 
+              padding: 40px !important; 
+              margin: 0 !important;
+              color: black !important;
+            }
+            #printable-invoice-area { 
+              display: block !important; 
+              width: 100% !important; 
+              visibility: visible !important;
+            }
+            .no-print { display: none !important; }
+            @page { margin: 10mm; size: auto; }
+          </style>
+        </head>
+        <body>
+          <div id="printable-invoice-area">
+            ${content}
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(() => {
+                window.focus();
+                window.print();
+                window.close();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const viewingClient = viewingInvoice ? clients.find(c => c.id === viewingInvoice.clientId) : null;
@@ -492,9 +602,21 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
           <h2 className="text-2xl font-black text-gray-900 tracking-tight uppercase">Billing Ledger</h2>
           <p className="text-sm text-gray-500 font-medium italic">History of {invoices.length} business statements.</p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center gap-2 shadow-xl transition-all">
-          <Plus size={18} className="text-yellow-500" /> Create New Statement
-        </button>
+        <div className="flex items-center gap-4">
+          <div className="relative group">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-black transition-colors" />
+            <input 
+              type="text" 
+              placeholder="Search Sales Person..." 
+              value={searchSalesPerson}
+              onChange={e => setSearchSalesPerson(e.target.value)}
+              className="pl-12 pr-6 py-4 bg-white border border-gray-200 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-black w-64 transition-all"
+            />
+          </div>
+          <button onClick={() => setIsModalOpen(true)} className="bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center gap-2 shadow-xl transition-all">
+            <Plus size={18} className="text-yellow-500" /> Create New Statement
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-[2.5rem] border border-gray-200 shadow-sm overflow-hidden">
@@ -504,6 +626,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
               <tr>
                 <th className="px-6 py-6">Statement #</th>
                 <th className="px-6 py-6">Client</th>
+                <th className="px-6 py-6">Sales Person</th>
                 <th className="px-6 py-6">Method</th>
                 <th className="px-6 py-6 text-right">Total</th>
                 <th className="px-6 py-6 text-right">Paid</th>
@@ -513,11 +636,12 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {invoices.map(inv => {
+              {filteredInvoices.map(inv => {
                 const isDeleting = deletingId === inv.id;
                 const pMethod = inv.paymentMethod || 'Cash';
-                const paid = pMethod === 'Cash' ? inv.total : (inv.paidAmount || 0);
-                const balance = inv.total - paid;
+                const isReturned = inv.status === 'Returned';
+                const paid = isReturned ? 0 : (pMethod === 'Cash' ? inv.total : (inv.paidAmount || 0));
+                const balance = isReturned ? 0 : (inv.total - paid);
                 return (
                   <tr key={inv.id} onClick={() => setViewingInvoice(inv)} className="hover:bg-yellow-50/20 cursor-pointer transition-colors group">
                     <td className="px-6 py-5 font-black text-gray-900">
@@ -525,6 +649,12 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <p className="text-[8px] text-gray-400 font-bold mt-1">{inv.date}</p>
                     </td>
                     <td className="px-6 py-5 font-bold text-gray-600">{inv.clientName}</td>
+                    <td className="px-6 py-5">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-gray-900 uppercase tracking-tighter">{inv.salesPerson || '-'}</span>
+                        <span className="text-[8px] font-bold text-gray-400 lowercase tracking-tight">{inv.createdByName || 'Admin'}</span>
+                      </div>
+                    </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-400">
                          {pMethod === 'Cash' ? <Banknote size={12} className="text-green-500" /> : <CreditCard size={12} className="text-blue-500" />}
@@ -535,10 +665,23 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     <td className="px-6 py-5 text-right font-bold text-green-600">Rs. {(paid || 0).toLocaleString()}</td>
                     <td className="px-6 py-5 text-right font-bold text-red-600">Rs. {(balance || 0).toLocaleString()}</td>
                     <td className="px-6 py-5 text-center">
-                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${inv.status === 'Paid' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{inv.status}</span>
+                      <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                        inv.status === 'Paid' ? 'bg-green-50 text-green-700 border-green-200' : 
+                        inv.status === 'Returned' ? 'bg-red-50 text-red-700 border-red-200' :
+                        'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>{inv.status}</span>
                     </td>
                     <td className="px-6 py-5 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {inv.status !== 'Returned' && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleReturnInvoice(inv); }}
+                            className="p-2.5 bg-orange-50 border border-orange-100 rounded-xl text-orange-600 hover:bg-orange-600 hover:text-white transition-all shadow-sm"
+                            title="Return Invoice"
+                          >
+                            <RotateCcw size={16} />
+                          </button>
+                        )}
                         {inv.status === 'Pending' && (
                           <button 
                             onClick={(e) => { e.stopPropagation(); handleMarkAsPaid(inv); }}
@@ -645,7 +788,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
             </div>
 
             <div className="flex-1 overflow-y-auto p-10 space-y-10">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
                 <div className="md:col-span-2">
                   <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Client Portfolio</label>
                   <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-bold outline-none">
@@ -677,7 +820,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     className="w-full p-5 bg-yellow-50 text-yellow-800 border-yellow-200 border rounded-[1.25rem] font-black text-xs outline-none"
                   >
                     <option value="">+ SELECT ASSET...</option>
-                    {products
+                    {filteredProducts
                       .filter(p => 
                         p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
                         p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
@@ -686,12 +829,18 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Discount (%)</label>
-                  <input type="number" value={discountRate} onChange={e => setDiscountRate(parseFloat(e.target.value) || 0)} className="w-full p-5 bg-red-50 border border-red-100 rounded-[1.25rem] font-black outline-none text-center text-red-600" />
-                </div>
-                <div>
                   <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Tax (%)</label>
                   <input type="number" value={taxRate} onChange={e => setTaxRate(parseFloat(e.target.value) || 0)} className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-black outline-none text-center" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Sales Person</label>
+                  <input 
+                    type="text" 
+                    value={salesPerson} 
+                    onChange={e => setSalesPerson(e.target.value)} 
+                    placeholder="Enter Name..."
+                    className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-black outline-none text-center" 
+                  />
                 </div>
               </div>
 
@@ -703,6 +852,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <th className="px-6 py-6 text-center">Size</th>
                       <th className="px-6 py-6 text-center">MRP</th>
                       <th className="px-6 py-6 text-center">Trade Price</th>
+                      <th className="px-6 py-6 text-center">Disc (%)</th>
                       <th className="px-6 py-6 text-center">Qty</th>
                       <th className="px-8 py-6 text-right">Line Total</th>
                       <th className="px-6 py-6"></th>
@@ -727,6 +877,15 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         <td className="px-6 py-5 text-center text-xs font-bold text-gray-400 line-through">Rs. {item.mrp}</td>
                         <td className="px-6 py-5 text-center">
                           <input type="number" value={item.tp} onChange={e => updateItem(item.productId, { tp: parseFloat(e.target.value) || 0 })} className="w-24 bg-yellow-50 border border-yellow-100 rounded-xl p-2.5 text-center font-black outline-none text-yellow-700" />
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <input 
+                            type="number" 
+                            step="0.1"
+                            value={item.discount} 
+                            onChange={e => updateItem(item.productId, { discount: parseFloat(e.target.value) || 0 })} 
+                            className="w-20 bg-red-50 border border-red-100 rounded-xl p-2.5 text-center font-black outline-none text-red-600" 
+                          />
                         </td>
                         <td className="px-6 py-5 text-center">
                           <input type="number" min="1" value={item.quantity} onChange={e => updateItem(item.productId, { quantity: parseInt(e.target.value) || 1 })} className="w-16 bg-gray-100 border-none rounded-xl p-2.5 text-center font-black outline-none" />
@@ -754,7 +913,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                    <p className="text-xl font-black text-gray-900">Rs. {(subtotal || 0).toLocaleString()}</p>
                 </div>
                 <div>
-                   <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Discount ({discountRate}%)</p>
+                   <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Total Discount</p>
                    <p className="text-xl font-black text-red-600">Rs. {(discountTotal || 0).toLocaleString()}</p>
                 </div>
                 <div>
@@ -780,15 +939,33 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
       {/* Detail View Modal */}
       {viewingInvoice && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto no-print">
-          <div className="bg-white w-full max-w-5xl max-h-[85vh] rounded-[3rem] overflow-hidden flex flex-col shadow-2xl my-auto animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto invoice-modal-overlay">
+          <div className="bg-white w-full max-w-5xl max-h-[85vh] rounded-[3rem] overflow-hidden flex flex-col shadow-2xl my-auto animate-in zoom-in-95 duration-200 invoice-modal-content">
             <div className="p-8 border-b flex justify-between items-center bg-gray-50/50 sticky top-0 z-10 no-print border-gray-100">
               <div className="flex items-center gap-4">
                  <FileText size={20} className="text-yellow-500" />
-                 <h3 className="text-xl font-black uppercase tracking-widest">{viewingInvoice.invoiceNumber}</h3>
-                 <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${viewingInvoice.status === 'Paid' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{viewingInvoice.status}</span>
+                 <div className="flex flex-col">
+                   <h3 className="text-xl font-black uppercase tracking-widest">{viewingInvoice.invoiceNumber}</h3>
+                   {viewingInvoice.salesPerson && (
+                     <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest -mt-1">Sales Person: {viewingInvoice.salesPerson}</p>
+                   )}
+                 </div>
+                 <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                   viewingInvoice.status === 'Paid' ? 'bg-green-50 text-green-700 border-green-200' : 
+                   viewingInvoice.status === 'Returned' ? 'bg-red-50 text-red-700 border-red-200' :
+                   'bg-amber-50 text-amber-700 border-amber-200'
+                 }`}>{viewingInvoice.status}</span>
               </div>
               <div className="flex items-center gap-3">
+                {viewingInvoice.status !== 'Returned' && (
+                  <button 
+                    onClick={() => handleReturnInvoice(viewingInvoice)}
+                    disabled={isReturning}
+                    className="flex items-center gap-3 px-6 py-3 bg-orange-600 text-white rounded-xl font-black text-[10px] uppercase hover:bg-orange-700 shadow-lg transition-all disabled:opacity-50"
+                  >
+                    {isReturning ? <Loader2 className="animate-spin" size={18} /> : <RotateCcw size={18} />} Return Invoice
+                  </button>
+                )}
                 {viewingInvoice.status === 'Pending' && (
                   <>
                     <button 
@@ -876,6 +1053,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">MRP</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Trade Price</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Disc (%)</th>
                       <th className="py-6 text-right text-[11px] font-black uppercase tracking-widest">Total</th>
                     </tr>
                   </thead>
@@ -889,30 +1067,31 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         <td className="py-6 text-center font-black text-gray-900">{item.quantity}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.mrp}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.tp}</td>
+                        <td className="py-6 text-center font-black text-red-600">{item.discount}%</td>
                         <td className="py-6 text-right font-black text-gray-900">Rs. {(item.total || 0).toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-4 border-black">
-                      <td colSpan={4}></td>
-                      <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Subtotal</td>
+                      <td colSpan={5}></td>
+                      <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Gross Subtotal</td>
                       <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {(viewingInvoice.subtotal || 0).toLocaleString()}</td>
                     </tr>
                     {viewingInvoice.discountTotal > 0 && (
                       <tr>
-                        <td colSpan={4}></td>
-                        <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Discount ({viewingInvoice.discountRate}%)</td>
+                        <td colSpan={5}></td>
+                        <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Total Discount</td>
                         <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingInvoice.discountTotal || 0).toLocaleString()}</td>
                       </tr>
                     )}
                     <tr>
-                      <td colSpan={4}></td>
+                      <td colSpan={5}></td>
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingInvoice.taxRate}%)</td>
                       <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingInvoice.taxTotal || 0).toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td colSpan={4}></td>
+                      <td colSpan={5}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
                       <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {(viewingInvoice.total || 0).toLocaleString()}</td>
                     </tr>
@@ -971,6 +1150,41 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
           </div>
         </div>
       )}
+      {/* Return Confirmation Modal */}
+      {showReturnConfirm && invoiceToReturn && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-10 text-center">
+              <div className="w-24 h-24 bg-orange-100 text-orange-600 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-inner">
+                <RotateCcw size={40} />
+              </div>
+              <h3 className="text-2xl font-black uppercase tracking-tighter mb-4">Return Invoice?</h3>
+              <p className="text-gray-500 font-bold text-sm mb-10 leading-relaxed">
+                Are you sure you want to return <span className="text-black font-black">Invoice #{invoiceToReturn.invoiceNumber}</span>? 
+                This will restock all items and mark the invoice as <span className="text-red-600 font-black">Returned</span>.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <button 
+                  onClick={() => { setShowReturnConfirm(false); setInvoiceToReturn(null); }}
+                  className="py-5 bg-gray-100 text-gray-400 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-gray-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmReturnInvoice}
+                  disabled={isReturning}
+                  className="py-5 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-orange-700 shadow-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isReturning ? <Loader2 className="animate-spin" size={16} /> : <RotateCcw size={16} />}
+                  Confirm Return
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Record Payment Modal */}
       {isRecordingPayment && viewingInvoice && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">

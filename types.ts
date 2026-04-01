@@ -93,9 +93,10 @@ export interface Invoice {
   taxRate: number; 
   taxTotal: number;
   total: number;
-  status: 'Paid' | 'Pending' | 'Overdue';
+  status: 'Paid' | 'Pending' | 'Overdue' | 'Returned';
   paymentMethod: 'Cash' | 'Credit';
   paidAmount?: number;
+  salesPerson?: string;
   createdBy?: string;
   createdByName?: string;
   createdAt?: string;

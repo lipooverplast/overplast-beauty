@@ -81,15 +81,30 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   }, [products, historyMonth, viewMode]);
 
   const filteredProducts = useMemo(() => {
-    return safeProducts.filter(p => {
-      const name = (p.name || '').toLowerCase();
-      const sku = (p.sku || '').toLowerCase();
-      const search = searchTerm.toLowerCase();
-      const matchesSearch = name.includes(search) || sku.includes(search);
+    const nameSearch = searchTerm.toLowerCase();
+    
+    if (role === 'Admin') {
+      return safeProducts.filter(p => {
+        const matchesSearch = (p.name || '').toLowerCase().includes(nameSearch) || (p.sku || '').toLowerCase().includes(nameSearch);
+        const matchesCategory = selectedCategory === 'All Categories' || p.category === selectedCategory;
+        return matchesSearch && matchesCategory;
+      });
+    }
+
+    // Staff Logic:
+    // Only show products registered by this staff member
+    const staffProducts = safeProducts.filter(p => p.createdBy === userId);
+    
+    return staffProducts.filter(p => {
+      const matchesSearch = (p.name || '').toLowerCase().includes(nameSearch) || (p.sku || '').toLowerCase().includes(nameSearch);
       const matchesCategory = selectedCategory === 'All Categories' || p.category === selectedCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [safeProducts, searchTerm, selectedCategory]);
+  }, [safeProducts, searchTerm, selectedCategory, role, userId]);
+
+  const adminProducts = useMemo(() => {
+    return safeProducts.filter(p => p.createdByName === ADMIN_EMAIL || !p.createdBy);
+  }, [safeProducts]);
 
   const filteredTransactions = useMemo(() => {
     return allTransactions.filter(tx => {
@@ -118,10 +133,18 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     setIsSaving(true);
 
     try {
-      const updatedProduct = { ...editingProduct, stock: editingProduct.stock + restockQty };
+      const productId = editingProduct.id;
+      
+      const updatedProduct: Product = { 
+        ...editingProduct, 
+        stock: editingProduct.stock + restockQty,
+        createdBy: userId,
+        createdByName: userEmail
+      };
+      
       const transaction: StockTransaction = {
         id: db.generateUUID(),
-        productId: editingProduct.id,
+        productId: productId,
         productName: editingProduct.name,
         productSize: editingProduct.size,
         type: 'IN',
@@ -257,22 +280,37 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     }
   };
 
+  const [selectedAdminProductId, setSelectedAdminProductId] = useState<string>('');
+
+  const handleAdminProductSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const productId = e.target.value;
+    setSelectedAdminProductId(productId);
+    
+    if (productId) {
+      const adminProduct = adminProducts.find(p => p.id === productId);
+      if (adminProduct) {
+        // We can't easily update defaultValue of inputs after render, 
+        // so we might need to use controlled inputs or a key change to reset the form.
+        // For now, let's just keep it simple and let the user know we'll pre-fill if possible.
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // Removed role check to allow Staff to add their own products
     setIsSaving(true);
     const formData = new FormData(e.currentTarget);
     const mrp = Number(formData.get('mrp')) || 0;
     const tp = Number(formData.get('tp')) || 0;
     const purchasePrice = Number(formData.get('purchasePrice')) || 0;
     const stock = parseInt(formData.get('stock') as string) || 0;
-    const isNewProduct = !editingProduct;
     
-    // Get current user info from props or db if needed
-    // But we can just pass it to db.saveProducts and it will handle it if missing
+    // If editing a catalog item, treat it as a new product registration for the staff
+    const isNewProduct = !editingProduct;
+    const fromCatalog = !editingProduct && selectedAdminProductId;
     
     const productData: Product = {
-      id: editingProduct?.id || db.generateUUID(),
+      id: isNewProduct ? db.generateUUID() : editingProduct!.id,
       name: formData.get('name') as string,
       sku: formData.get('sku') as string,
       category: formData.get('category') as string,
@@ -285,9 +323,9 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       stock: stock,
       minStock: parseInt(formData.get('minStock') as string) || 0,
       description: formData.get('description') as string || '',
-      createdBy: editingProduct?.createdBy || userId,
-      createdByName: editingProduct?.createdByName || userEmail,
-      createdAt: editingProduct?.createdAt || new Date().toISOString()
+      createdBy: userId,
+      createdByName: userEmail,
+      createdAt: isNewProduct ? new Date().toISOString() : editingProduct!.createdAt
     };
 
     try {
@@ -302,7 +340,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
           type: 'IN',
           quantity: stock,
           date: new Date().toISOString().split('T')[0],
-          note: 'Initial Registration',
+          note: fromCatalog ? 'Initial Catalog Registration' : 'Initial Registration',
           createdBy: userId,
           createdByName: userEmail,
         };
@@ -312,7 +350,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       await onUpdate();
       setIsModalOpen(false);
       setEditingProduct(null);
-      alert(isNewProduct ? "Product registered successfully!" : "Product updated successfully!");
+      setSelectedAdminProductId('');
+      alert(fromCatalog ? "Product registered from catalog and stock added!" : (isNewProduct ? "Product registered successfully!" : "Product updated successfully!"));
     } catch (err: any) {
       console.error("Save Product Error:", err);
       alert(`Operation failed: ${err.message || "Unknown error"}`);
@@ -379,7 +418,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
           <button onClick={onUpdate} className="p-4 bg-gray-50 text-gray-400 hover:text-black rounded-2xl border border-gray-200 transition-all"><RefreshCw size={20} /></button>
           
           {viewMode === 'inventory' && (
-            <button onClick={() => { setEditingProduct(null); setIsModalOpen(true); }} className="flex items-center justify-center gap-3 bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl">
+            <button onClick={() => { setEditingProduct(null); setSelectedAdminProductId(''); setIsModalOpen(true); }} className="flex items-center justify-center gap-3 bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl">
               <Plus size={18} strokeWidth={3} className="text-yellow-500" /> Register Stock
             </button>
           )}
@@ -446,7 +485,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   <th className="px-8 py-6">Product</th>
                   <th className="px-6 py-6">SKU</th>
                   <th className="px-6 py-6">Size</th>
-                  <th className="px-6 py-6 text-center">Price</th>
+                  <th className="px-6 py-6 text-center">MRP</th>
+                  <th className="px-6 py-6 text-center">Trade Price</th>
                   <th className="px-6 py-6">Stock</th>
                   <th className="px-6 py-6">Status</th>
                   <th className="px-8 py-6 text-right">Actions</th>
@@ -498,8 +538,10 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       </td>
                       <td className="px-6 py-5 text-center">
                          <div className="text-sm font-black text-gray-900">Rs. {(product.mrp || 0).toFixed(2)}</div>
-                         <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TP: Rs. {(product.tp || 0).toFixed(2)}</div>
                          <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">PP: Rs. {(product.purchasePrice || 0).toFixed(2)}</div>
+                      </td>
+                      <td className="px-6 py-5 text-center">
+                         <div className="text-sm font-black text-yellow-700">Rs. {(product.tp || 0).toFixed(2)}</div>
                       </td>
                           <td className="px-6 py-5">
                             <div className="flex items-center gap-3">
@@ -525,9 +567,9 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                             </div>
                           </td>
                       <td className="px-6 py-5">
-                        <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${status.color}`}>
+                        <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${status.color}`}>
                           {status.label}
-                        </span>
+                        </div>
                       </td>
                       <td className="px-8 py-5 text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -858,37 +900,75 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 <div className="w-12 h-12 bg-black text-yellow-500 rounded-2xl flex items-center justify-center"><Package size={24} /></div>
                 <h3 className="text-xl font-black text-gray-900 uppercase tracking-tighter">{editingProduct ? 'Update Stock' : 'Register Stock'}</h3>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-red-50 hover:text-red-600 rounded-2xl"><X size={28} /></button>
+              <button onClick={() => { setIsModalOpen(false); setSelectedAdminProductId(''); }} className="p-3 hover:bg-red-50 hover:text-red-600 rounded-2xl"><X size={28} /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-10 space-y-8 max-h-[75vh] overflow-y-auto">
+            <form key={editingProduct?.id || selectedAdminProductId} onSubmit={handleSubmit} className="p-10 space-y-8 max-h-[75vh] overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Product Name</label><input required name="name" defaultValue={editingProduct?.name} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">SKU Identity</label><input required name="sku" defaultValue={editingProduct?.sku} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label><input required name="category" defaultValue={editingProduct?.category} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Size Option</label>
-                  <select 
-                    name="size" 
-                    defaultValue={editingProduct?.size || ''} 
-                    className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-black/5"
-                  >
-                    <option value="">No Size</option>
-                    <option value="Small">Small</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Large">Large</option>
-                    <option value="XL">XL</option>
-                    <option value="XXL">XXL</option>
-                    <option value="3XL">3XL</option>
-                    <option value="4XL">4XL</option>
-                    <option value="5XL">5XL</option>
-                    <option value="Cust">Cust</option>
-                  </select>
-                </div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label><input required type="number" step="0.01" name="mrp" defaultValue={editingProduct?.mrp} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-black" /></div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label><input required type="number" step="0.01" name="tp" defaultValue={editingProduct?.tp} className="w-full px-5 py-4 bg-yellow-50/30 border border-yellow-100 rounded-2xl font-black" /></div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label><input required type="number" step="0.01" name="purchasePrice" defaultValue={editingProduct?.purchasePrice} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" /></div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Stock Quantity</label><input required type="number" name="stock" defaultValue={editingProduct?.stock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Alert Level (Min Stock)</label><input required type="number" name="minStock" defaultValue={editingProduct?.minStock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
+                {!editingProduct && role === 'Staff' && (
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Select Product from Admin Catalog</label>
+                    <select 
+                      value={selectedAdminProductId}
+                      onChange={handleAdminProductSelect}
+                      className="w-full px-5 py-4 bg-yellow-50 border border-yellow-100 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10"
+                    >
+                      <option value="">-- Create New Custom Product --</option>
+                      {adminProducts.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} (Rs. {p.tp.toFixed(2)})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-[10px] text-gray-400 font-bold italic">Selecting an admin product will pre-fill the details below.</p>
+                  </div>
+                )}
+                
+                {/* Pre-fill logic based on selectedAdminProductId */}
+                {(() => {
+                  const adminProduct = !editingProduct && selectedAdminProductId ? adminProducts.find(p => p.id === selectedAdminProductId) : null;
+                  const defaultName = editingProduct?.name || adminProduct?.name || '';
+                  const defaultSku = editingProduct?.sku || adminProduct?.sku || '';
+                  const defaultCategory = editingProduct?.category || adminProduct?.category || '';
+                  const defaultSize = editingProduct?.size || adminProduct?.size || '';
+                  const defaultMrp = editingProduct?.mrp || adminProduct?.mrp || '';
+                  const defaultTp = editingProduct?.tp || adminProduct?.tp || '';
+                  const defaultPp = editingProduct?.purchasePrice || adminProduct?.purchasePrice || '';
+                  const defaultMinStock = editingProduct?.minStock || adminProduct?.minStock || 0;
+                  const defaultDescription = editingProduct?.description || adminProduct?.description || '';
+
+                  return (
+                    <>
+                      <div className="md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Product Name</label><input required name="name" defaultValue={defaultName} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
+                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">SKU Identity</label><input required name="sku" defaultValue={defaultSku} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
+                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label><input required name="category" defaultValue={defaultCategory} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Size Option</label>
+                        <select 
+                          name="size" 
+                          defaultValue={defaultSize} 
+                          className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-black/5"
+                        >
+                          <option value="">No Size</option>
+                          <option value="Small">Small</option>
+                          <option value="Medium">Medium</option>
+                          <option value="Large">Large</option>
+                          <option value="XL">XL</option>
+                          <option value="XXL">XXL</option>
+                          <option value="3XL">3XL</option>
+                          <option value="4XL">4XL</option>
+                          <option value="5XL">5XL</option>
+                          <option value="Cust">Cust</option>
+                        </select>
+                      </div>
+                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label><input required type="number" step="0.01" name="mrp" defaultValue={defaultMrp} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-black" /></div>
+                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label><input required type="number" step="0.01" name="tp" defaultValue={defaultTp} className="w-full px-5 py-4 bg-yellow-50/30 border border-yellow-100 rounded-2xl font-black" /></div>
+                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label><input required type="number" step="0.01" name="purchasePrice" defaultValue={defaultPp} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" /></div>
+                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Stock Quantity</label><input required type="number" name="stock" defaultValue={editingProduct?.stock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
+                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Alert Level (Min Stock)</label><input required type="number" name="minStock" defaultValue={defaultMinStock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
+                      <div className="md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Description</label><textarea name="description" defaultValue={defaultDescription} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm" rows={2} /></div>
+                    </>
+                  );
+                })()}
               </div>
               <button disabled={isSaving} className="w-full py-6 bg-black text-white font-black rounded-3xl uppercase tracking-widest text-[10px] hover:bg-gray-900 transition-all flex items-center justify-center gap-4 disabled:opacity-50">
                 {isSaving ? <Loader2 className="animate-spin text-yellow-500" size={24} /> : <>Commit to Database <Sparkles size={20} className="text-yellow-500" /></>}

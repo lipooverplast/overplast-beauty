@@ -82,7 +82,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, userId,
     const fetchTransactions = async () => {
       const txs = await db.getStockTransactions(role === 'Admin' ? undefined : userId);
       const currentMonth = new Date().toISOString().slice(0, 7);
-      const inUnits = txs.filter(t => t.type === 'IN' && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
+      const inUnits = txs.filter(t => (t.type === 'IN' || t.type === 'RETURN') && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
       const outUnits = txs.filter(t => t.type === 'OUT' && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
       setMonthlyIn(inUnits);
       setMonthlyOut(outUnits);
@@ -90,9 +90,11 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, userId,
     fetchTransactions();
   }, [products, invoices, userId, role]);
 
-  const totalRevenue = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
-  const netSales = invoices.reduce((sum, inv) => sum + ((inv.subtotal || 0) - (inv.discountTotal || 0)), 0);
-  const totalCost = invoices.reduce((sum, inv) => {
+  const staffProducts = role === 'Admin' ? products : products.filter(p => p.createdBy === userId);
+  const validInvoices = invoices.filter(inv => inv.status !== 'Returned');
+  const totalRevenue = validInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+  const netSales = validInvoices.reduce((sum, inv) => sum + ((inv.subtotal || 0) - (inv.discountTotal || 0)), 0);
+  const totalCost = validInvoices.reduce((sum, inv) => {
     return sum + (inv.items || []).reduce((itemSum, item) => {
       const product = products.find(p => p.id === item.productId);
       const purchasePrice = product?.purchasePrice || 0;
@@ -100,18 +102,17 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, userId,
     }, 0);
   }, 0);
   const estimatedProfit = netSales - totalCost;
-  const lowStockItems = products.filter(p => p.stock <= p.minStock).length;
-  const inventoryValue = products.reduce((sum, p) => sum + (p.tp * p.stock), 0);
+  const lowStockItems = staffProducts.filter(p => p.stock <= p.minStock).length;
+  const inventoryValue = staffProducts.reduce((sum, p) => sum + (p.tp * p.stock), 0);
 
   const adminStats = [
     { label: 'Net Asset Value', value: `Rs. ${inventoryValue.toLocaleString()}`, icon: Wallet, color: 'text-indigo-600', bg: 'bg-indigo-50', trend: 'Valuation' },
     { label: 'Revenue (Total)', value: `Rs. ${totalRevenue.toLocaleString()}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50', trend: 'Inbound' },
-    { label: 'Estimated Profit', value: `Rs. ${estimatedProfit.toLocaleString()}`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50', trend: 'Net Gain' },
     { label: 'Critical Assets', value: lowStockItems, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50', trend: 'Reorder Now' },
   ];
 
   const staffStats = [
-    { label: 'Total Assets', value: products.length, icon: Package, color: 'text-gray-900', bg: 'bg-gray-100', trend: 'Portfolio' },
+    { label: 'Total Assets', value: staffProducts.length, icon: Package, color: 'text-gray-900', bg: 'bg-gray-100', trend: 'Portfolio' },
     { label: 'Monthly In', value: monthlyIn, icon: ArrowUpRight, color: 'text-green-600', bg: 'bg-green-50', trend: 'Received' },
     { label: 'Monthly Out', value: monthlyOut, icon: ArrowDownLeft, color: 'text-blue-600', bg: 'bg-blue-50', trend: 'Dispatched' },
     { label: 'Alerts', value: lowStockItems, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50', trend: 'Low Stock' },
@@ -343,8 +344,8 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, userId,
                <span className="text-[10px] font-black text-red-600 bg-red-50 px-4 py-1.5 rounded-full border border-red-100 uppercase tracking-widest">Attention</span>
             </div>
             <div className="space-y-8">
-              {products.filter(p => p.stock <= p.minStock * 1.5).length > 0 ? (
-                products.filter(p => p.stock <= p.minStock * 1.5).slice(0, 5).map((p, idx) => (
+              {staffProducts.filter(p => p.stock <= p.minStock * 1.5).length > 0 ? (
+                staffProducts.filter(p => p.stock <= p.minStock * 1.5).slice(0, 5).map((p, idx) => (
                   <div key={idx} className="space-y-4">
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[0.1em]">
                       <span className="text-gray-900 truncate max-w-[140px]">{p.name}</span>

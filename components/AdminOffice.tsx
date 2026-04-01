@@ -1,14 +1,14 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../db';
-import { Profile, UserRole, UserStatus, Invoice, Product, ViewType, Client } from '../types';
+import { Profile, UserRole, UserStatus, Invoice, Product, ViewType, Client, StockTransaction } from '../types';
 import { 
   Users, Shield, Activity, Lock, Search, 
   MoreVertical, RefreshCw, Loader2, ShieldCheck, 
   UserPlus, Ban, CheckCircle, Database, Server,
   History, Eye, Trash2, Key, Mail, TrendingUp, BarChart3, PieChart as PieChartIcon, DollarSign,
   Receipt, ArrowUpRight, ArrowDownRight, Percent, Briefcase, Calendar, Printer, Download, FileText, X, AlertTriangle,
-  Zap, PlusSquare, FilePlus, UserPlus2, Wallet2, ChevronDown, Sparkles
+  Zap, PlusSquare, FilePlus, UserPlus2, Wallet2, ChevronDown, Sparkles, Package
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -18,14 +18,16 @@ import UserManagement from './UserManagement';
 import ActivityLog from './ActivityLog';
 import SettingsView from './Settings';
 import SecuritySettings from './SecuritySettings';
+import SalesReport from './SalesReport';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import * as XLSX from 'xlsx';
 import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from '../constants';
 import { geminiService } from '../geminiService';
 
 const AdminLogo = () => (
   <div className="flex items-center gap-4">
-    <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center p-2 shadow-2xl border border-gray-100">
+    <div className="w-24 h-24 flex items-center justify-center p-2">
       <img 
         src={APP_LOGO_URL} 
         alt={APP_NAME} 
@@ -60,7 +62,7 @@ const AdminOffice: React.FC<{
   userEmail?: string,
   role?: UserRole
 }> = ({ onUpdate, onNavigate, invoices: propInvoices, clients: propClients, products: propProducts, userId, userEmail, role }) => {
-  const [activeTab, setActiveTab] = useState<'users' | 'activity' | 'infrastructure' | 'reports' | 'intelligence' | 'security'>('intelligence');
+  const [activeTab, setActiveTab] = useState<'users' | 'activity' | 'infrastructure' | 'reports' | 'intelligence' | 'security' | 'sales-report'>('intelligence');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [stats, setStats] = useState({
@@ -75,6 +77,7 @@ const AdminOffice: React.FC<{
   });
   const [allInvoices, setAllInvoices] = useState<Invoice[]>(propInvoices || []);
   const [allProducts, setAllProducts] = useState<Product[]>(propProducts || []);
+  const [allTransactions, setAllTransactions] = useState<StockTransaction[]>([]);
   const [loading, setLoading] = useState(!propInvoices);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -104,20 +107,22 @@ const AdminOffice: React.FC<{
     }
 
     try {
-      const [profiles, invoices, products] = await Promise.all([
+      const [profiles, invoices, products, transactions] = await Promise.all([
         db.getAllProfiles(),
         shouldFetchInvoices ? db.getInvoices() : Promise.resolve(propInvoices!),
-        shouldFetchProducts ? db.getProducts() : Promise.resolve(propProducts!)
+        shouldFetchProducts ? db.getProducts() : Promise.resolve(propProducts!),
+        db.getStockTransactions()
       ]);
 
       setAllInvoices(invoices);
       setAllProducts(products);
+      setAllTransactions(transactions);
       
       // Reset AI summary when month changes
       setAiSummary(null);
 
       const monthlyInvoices = invoices.filter(inv => 
-        inv.date.startsWith(selectedMonth)
+        inv.date.startsWith(selectedMonth) && inv.status !== 'Returned'
       );
       
       const rev = monthlyInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
@@ -159,7 +164,7 @@ const AdminOffice: React.FC<{
   // Process data for charts
   const chartData = useMemo(() => {
     const dailyData: Record<string, { date: string, day: string, revenue: number, debit: number, profit: number, invoices: Invoice[] }> = {};
-    const monthlyInvoices = allInvoices.filter(inv => inv.date.startsWith(selectedMonth));
+    const monthlyInvoices = allInvoices.filter(inv => inv.date.startsWith(selectedMonth) && inv.status !== 'Returned');
     
     monthlyInvoices.forEach(inv => {
       const date = inv.date;
@@ -198,7 +203,8 @@ const AdminOffice: React.FC<{
 
   const topProducts = useMemo(() => {
     const productSales: Record<string, number> = {};
-    allInvoices.forEach(inv => {
+    const validInvoices = allInvoices.filter(inv => inv.status !== 'Returned');
+    validInvoices.forEach(inv => {
       inv.items.forEach(item => {
         productSales[item.name] = (productSales[item.name] || 0) + (item.quantity || 0);
       });
@@ -211,7 +217,8 @@ const AdminOffice: React.FC<{
 
   const clientGrowth = useMemo(() => {
     const monthlyClients: Record<string, number> = {};
-    allInvoices.forEach(inv => {
+    const validInvoices = allInvoices.filter(inv => inv.status !== 'Returned');
+    validInvoices.forEach(inv => {
       const month = inv.date.slice(0, 7);
       monthlyClients[month] = (monthlyClients[month] || 0) + 1;
     });
@@ -311,6 +318,35 @@ const AdminOffice: React.FC<{
     }
   };
 
+  const exportReportToExcel = () => {
+    const data = chartData.map(day => ({
+      'Date': day.date,
+      'Day': new Date(day.date).toLocaleDateString('en-PK', { weekday: 'long' }),
+      'Credit (Revenue)': day.revenue,
+      'Debit (Expenses)': day.debit
+    }));
+
+    // Add totals row
+    data.push({
+      'Date': 'TOTALS',
+      'Day': '',
+      'Credit (Revenue)': stats.totalRevenue,
+      'Debit (Expenses)': stats.totalCost + stats.totalTax
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Financial Ledger");
+
+    // Auto-size columns
+    const maxWidths = Object.keys(data[0]).map(key => {
+      return Math.max(...data.map(row => String((row as any)[key]).length), key.length) + 2;
+    });
+    worksheet['!cols'] = maxWidths.map(w => ({ wch: w }));
+
+    XLSX.writeFile(workbook, `Overplast_Financial_Ledger_${selectedMonth}.xlsx`);
+  };
+
   const shortcuts = [
     { label: 'New Asset', icon: PlusSquare, color: 'text-yellow-600', bg: 'bg-yellow-50', link: 'inventory' },
     { label: 'Create Bill', icon: FilePlus, color: 'text-blue-600', bg: 'bg-blue-50', link: 'invoices' },
@@ -359,6 +395,9 @@ const AdminOffice: React.FC<{
           </button>
           <button onClick={() => setActiveTab('reports')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'reports' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
             <BarChart3 size={14} /> Financials
+          </button>
+          <button onClick={() => setActiveTab('sales-report')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'sales-report' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
+            <Package size={14} /> Sales & Stocks
           </button>
           <button onClick={() => setActiveTab('security')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'security' ? 'bg-black text-white shadow-lg' : 'text-gray-500 hover:bg-white'}`}>
             <Lock size={14} /> Security
@@ -422,10 +461,10 @@ const AdminOffice: React.FC<{
           </div>
 
           {/* Graphical Representation Card 2: Asset Allocation */}
-          <div className="lg:col-span-4 bg-black p-10 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-8 opacity-5"><PieChartIcon size={120} /></div>
+          <div className="lg:col-span-4 bg-white p-10 rounded-[3.5rem] border border-gray-100 shadow-sm relative overflow-hidden">
+             <div className="absolute top-0 right-0 p-8 opacity-5 text-gray-900"><PieChartIcon size={120} /></div>
              <div className="relative z-10 h-full flex flex-col">
-                <h3 className="text-xl font-black uppercase tracking-tight mb-8">Asset Valuation</h3>
+                <h3 className="text-xl font-black text-gray-900 uppercase tracking-tight mb-8">Asset Valuation</h3>
                 <div className="flex-1 h-[200px]">
                    <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -507,23 +546,23 @@ const AdminOffice: React.FC<{
 
           {/* AI Intelligence Row */}
           <div className="lg:col-span-12">
-            <div className="bg-black p-12 rounded-[4rem] text-white shadow-2xl relative overflow-hidden group border border-gray-800">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-[100px] group-hover:bg-yellow-500/20 transition-all duration-1000"></div>
+            <div className="bg-white p-12 rounded-[4rem] border border-gray-100 shadow-sm relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/5 rounded-full blur-[100px] group-hover:bg-yellow-500/10 transition-all duration-1000"></div>
               <div className="relative z-10">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-12">
                   <div className="flex items-center gap-6">
-                    <div className="p-5 bg-yellow-500/10 text-yellow-500 rounded-[2rem] backdrop-blur-md border border-yellow-500/20 animate-pulse">
+                    <div className="p-5 bg-yellow-50 text-yellow-600 rounded-[2rem] border border-yellow-100 animate-pulse">
                       <Sparkles size={32} />
                     </div>
                     <div>
-                      <h3 className="text-2xl font-black uppercase tracking-tight mb-1">AI Financial Intelligence</h3>
-                      <p className="text-[10px] font-black text-yellow-500/50 uppercase tracking-[0.3em]">Deep Ledger Analysis & Forecasting</p>
+                      <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tight mb-1">AI Financial Intelligence</h3>
+                      <p className="text-[10px] font-black text-yellow-600 uppercase tracking-[0.3em]">Deep Ledger Analysis & Forecasting</p>
                     </div>
                   </div>
                   <button 
                     onClick={handleGenerateSummary}
                     disabled={loadingSummary}
-                    className="px-10 py-5 bg-yellow-500 text-black font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-white transition-all shadow-xl shadow-yellow-500/10 flex items-center gap-3 disabled:opacity-50"
+                    className="px-10 py-5 bg-black text-white font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-gray-900 transition-all shadow-xl flex items-center gap-3 disabled:opacity-50"
                   >
                     {loadingSummary ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} />}
                     {loadingSummary ? 'Analyzing Ledger...' : 'Generate AI Summary'}
@@ -531,15 +570,15 @@ const AdminOffice: React.FC<{
                 </div>
 
                 {aiSummary ? (
-                  <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <div className="prose prose-invert max-w-none">
-                      <p className="text-lg leading-relaxed font-medium opacity-90 whitespace-pre-wrap">{aiSummary}</p>
+                  <div className="bg-gray-50 p-10 rounded-[3rem] border border-gray-100 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="prose max-w-none">
+                      <p className="text-lg leading-relaxed font-medium text-gray-700 whitespace-pre-wrap">{aiSummary}</p>
                     </div>
                   </div>
                 ) : (
-                  <div className="py-20 text-center border-2 border-dashed border-white/10 rounded-[3rem] opacity-30">
-                    <Activity size={48} className="mx-auto mb-4" />
-                    <p className="text-xs font-black uppercase tracking-[0.3em]">Awaiting Intelligence Request</p>
+                  <div className="py-20 text-center border-2 border-dashed border-gray-100 rounded-[3rem] opacity-30">
+                    <Activity size={48} className="mx-auto mb-4 text-gray-400" />
+                    <p className="text-xs font-black uppercase tracking-[0.3em] text-gray-400">Awaiting Intelligence Request</p>
                   </div>
                 )}
               </div>
@@ -575,6 +614,14 @@ const AdminOffice: React.FC<{
             )}
             {activeTab === 'security' && <SecuritySettings />}
             {activeTab === 'infrastructure' && <SettingsView />}
+            {activeTab === 'sales-report' && (
+              <SalesReport 
+                products={allProducts}
+                invoices={allInvoices}
+                transactions={allTransactions}
+                role={role || 'Staff'}
+              />
+            )}
             {activeTab === 'reports' && (
               <div className="space-y-10 animate-in fade-in zoom-in-95 duration-500">
                 <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
@@ -587,8 +634,11 @@ const AdminOffice: React.FC<{
                    </div>
                    <div className="flex items-center gap-3">
                       <button onClick={() => window.print()} className="flex items-center gap-3 px-8 py-4 bg-white border border-gray-200 rounded-2xl font-black text-[10px] uppercase hover:bg-gray-50 transition-all"><Printer size={18} /> Print</button>
-                      <button onClick={exportReportToPdf} disabled={isGeneratingPdf} className="flex items-center gap-3 px-8 py-4 bg-black text-white rounded-2xl font-black text-[10px] uppercase hover:bg-gray-900 shadow-xl transition-all">
-                        {isGeneratingPdf ? <Loader2 className="animate-spin text-yellow-500" size={18} /> : <Download size={18} />} Export Report
+                      <button onClick={exportReportToPdf} disabled={isGeneratingPdf} className="flex items-center gap-3 px-8 py-4 bg-white border border-gray-200 text-gray-900 rounded-2xl font-black text-[10px] uppercase hover:bg-gray-50 transition-all">
+                        {isGeneratingPdf ? <Loader2 className="animate-spin text-yellow-500" size={18} /> : <Download size={18} />} Export PDF
+                      </button>
+                      <button onClick={exportReportToExcel} className="flex items-center gap-3 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase hover:bg-emerald-700 shadow-xl transition-all">
+                        <FileText size={18} /> Export Excel
                       </button>
                    </div>
                 </div>
@@ -625,10 +675,7 @@ const AdminOffice: React.FC<{
                           </div>
                        </div>
                     </div>
-                    <div className="bg-black p-16 rounded-[4rem] text-white shadow-2xl flex flex-col justify-center">
-                        <p className="text-[10px] font-black text-yellow-500 uppercase tracking-[0.4em] mb-6">Net Profit</p>
-                        <h2 className={`text-6xl font-black tracking-tighter ${stats.totalProfit >= 0 ? 'text-white' : 'text-red-400'}`}>Rs. {(stats.totalProfit || 0).toLocaleString()}</h2>
-                    </div>
+                    <div></div>
                   </div>
 
                   {/* Date-wise Ledger Section */}
@@ -659,10 +706,6 @@ const AdminOffice: React.FC<{
                                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Debit</p>
                                 <p className="text-lg font-black text-red-600">Rs. {(day.debit || 0).toLocaleString()}</p>
                               </div>
-                              <div className="text-right">
-                                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Profit</p>
-                                <p className={`text-lg font-black ${day.profit >= 0 ? 'text-gray-900' : 'text-red-600'}`}>Rs. {(day.profit || 0).toLocaleString()}</p>
-                              </div>
                               <div className={`p-2 rounded-lg bg-gray-100 text-gray-400 group-hover:bg-black group-hover:text-white transition-all ${expandedDate === day.date ? 'rotate-180' : ''}`}>
                                 <ChevronDown size={16} />
                               </div>
@@ -673,12 +716,11 @@ const AdminOffice: React.FC<{
                             <div className="p-8 pt-0 bg-white border-t border-gray-100 animate-in slide-in-from-top-2 duration-300">
                               <div className="overflow-x-auto">
                                 <table className="w-full text-left">
-                                  <thead className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-50">
+                                   <thead className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-50">
                                     <tr>
                                       <th className="py-4">Invoice #</th>
                                       <th className="py-4">Client</th>
                                       <th className="py-4 text-right">Revenue</th>
-                                      <th className="py-4 text-right">Net Profit</th>
                                       <th className="py-4 text-right">Action</th>
                                     </tr>
                                   </thead>
@@ -688,7 +730,6 @@ const AdminOffice: React.FC<{
                                         <td className="py-4 font-black text-gray-900 text-xs">{inv.invoiceNumber}</td>
                                         <td className="py-4 font-bold text-gray-600 text-xs">{inv.clientName}</td>
                                         <td className="py-4 text-right font-black text-gray-900 text-xs">Rs. {(inv.total || 0).toLocaleString()}</td>
-                                        <td className="py-4 text-right font-black text-emerald-600 text-xs">Rs. {(inv.profit || 0).toLocaleString()}</td>
                                         <td className="py-4 text-right">
                                           <button 
                                             onClick={() => onNavigate('invoices')}
@@ -707,8 +748,8 @@ const AdminOffice: React.FC<{
                         </div>
                       )) : (
                         <div className="py-20 text-center opacity-20 border-2 border-dashed border-gray-200 rounded-[2rem]">
-                          <History size={48} className="mx-auto mb-4" />
-                          <p className="font-black uppercase tracking-widest">No ledger data for this period</p>
+                          <History size={48} className="mx-auto mb-4 text-gray-400" />
+                          <p className="font-black uppercase tracking-widest text-gray-400">No ledger data for this period</p>
                         </div>
                       )}
                     </div>
@@ -717,11 +758,10 @@ const AdminOffice: React.FC<{
                     <div className="mt-12 overflow-hidden border border-gray-200 rounded-[2rem]">
                       <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="bg-gray-900 text-white">
+                          <tr className="bg-gray-100 text-gray-900 border-b border-gray-200">
                             <th className="p-6 text-[10px] font-black uppercase tracking-widest">Date</th>
                             <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Credit</th>
                             <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Debit</th>
-                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Profit</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -733,12 +773,11 @@ const AdminOffice: React.FC<{
                               </td>
                               <td className="p-6 text-right font-black text-green-600 text-sm">Rs. {(day.revenue || 0).toLocaleString()}</td>
                               <td className="p-6 text-right font-black text-red-600 text-sm">Rs. {(day.debit || 0).toLocaleString()}</td>
-                              <td className="p-6 text-right font-black text-gray-900 text-sm">Rs. {(day.profit || 0).toLocaleString()}</td>
                             </tr>
                           ))}
                           {chartData.length === 0 && (
                             <tr>
-                              <td colSpan={4} className="p-20 text-center text-xs font-black text-gray-400 uppercase tracking-widest">No data available</td>
+                              <td colSpan={3} className="p-20 text-center text-xs font-black text-gray-400 uppercase tracking-widest">No data available</td>
                             </tr>
                           )}
                         </tbody>
@@ -747,7 +786,6 @@ const AdminOffice: React.FC<{
                             <td className="p-6 font-black text-gray-900 uppercase text-[10px] tracking-widest">Monthly Totals</td>
                             <td className="p-6 text-right font-black text-green-700 text-lg">Rs. {(stats.totalRevenue || 0).toLocaleString()}</td>
                             <td className="p-6 text-right font-black text-red-700 text-lg">Rs. {(stats.totalCost + stats.totalTax || 0).toLocaleString()}</td>
-                            <td className="p-6 text-right font-black text-gray-900 text-xl">Rs. {(stats.totalProfit || 0).toLocaleString()}</td>
                           </tr>
                         </tfoot>
                       </table>

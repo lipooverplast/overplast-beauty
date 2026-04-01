@@ -199,7 +199,8 @@ const App: React.FC = () => {
       setDbError(false);
     } catch (err: any) {
       console.error("Bulk Refresh Error:", err);
-      if (err.message === 'Failed to fetch') {
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network') || errorMsg.includes('failed to connect')) {
         setDbError(true);
       }
     } finally {
@@ -241,55 +242,7 @@ const App: React.FC = () => {
   }
 
   const ActiveComponent = {
-    dashboard: (
-      <div className="space-y-6">
-        {dbError && (
-          <div className="bg-red-50 border-4 border-red-600 p-8 rounded-[2rem] shadow-xl animate-in slide-in-from-top-4 duration-500">
-             <div className="flex items-start gap-6">
-               <div className="p-4 bg-red-600 text-white rounded-2xl shadow-lg"><DatabaseZap size={32} /></div>
-               <div className="flex-1">
-                 <h3 className="text-2xl font-black text-red-900 uppercase tracking-tighter mb-2">Cloud Connectivity Interrupted</h3>
-                 <p className="text-red-700 font-bold mb-4 leading-relaxed">The system could not reach your cloud database. This usually happens if your Supabase URL/Key is incorrect, your internet is disconnected, or Row Level Security (RLS) is blocking access.</p>
-                 <div className="space-y-4">
-                   <div className="bg-white p-4 rounded-xl border border-red-200">
-                     <p className="text-[10px] font-black uppercase text-gray-400 mb-2">Troubleshooting Step 1: Check RLS</p>
-                     <p className="text-xs text-red-900 mb-2">Run this in Supabase SQL Editor:</p>
-                     <div className="bg-gray-900 p-3 rounded-lg text-[10px] font-mono text-green-400 break-all select-all">
-                       ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
-                     </div>
-                   </div>
-                   <div className="bg-white p-4 rounded-xl border border-red-200">
-                     <p className="text-[10px] font-black uppercase text-gray-400 mb-2">Troubleshooting Step 2: Check Config</p>
-                     <p className="text-xs text-red-900">Ensure your <span className="font-bold">VITE_SUPABASE_URL</span> and <span className="font-bold">VITE_SUPABASE_ANON_KEY</span> are correctly set in your environment variables.</p>
-                   </div>
-                 </div>
-                 <div className="flex flex-col sm:flex-row gap-4 mt-8">
-                    <button 
-                      onClick={() => window.location.reload()}
-                      className="px-6 py-3 bg-black text-white rounded-xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all flex items-center justify-center gap-3 text-[10px]"
-                    >
-                      <RefreshCw size={14} />
-                      Reload App
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setDbError(false);
-                        fetchInitialData();
-                      }}
-                      className="px-6 py-3 bg-gray-100 text-gray-900 rounded-xl font-black uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center justify-center gap-3 text-[10px]"
-                    >
-                      <Zap size={14} />
-                      Retry Connection
-                    </button>
-                  </div>
-                 <p className="text-red-800 text-[10px] font-black uppercase tracking-widest mt-6">Click the refresh icon in the sidebar after fixing.</p>
-               </div>
-             </div>
-          </div>
-        )}
-        <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />
-      </div>
-    ),
+    dashboard: <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
     inventory: <Inventory products={products} onUpdate={refreshData} role={effectiveRole} userId={user?.id} userEmail={user?.email} />,
     invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} userEmail={user?.email} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
     recurring: <RecurringInvoices products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} />,
@@ -311,11 +264,11 @@ const App: React.FC = () => {
         <div className="h-full flex flex-col p-6 overflow-y-auto">
           <div className="flex items-center justify-between mb-10 px-2">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-white text-white rounded-xl flex items-center justify-center shadow-lg overflow-hidden border border-gray-100">
+              <div className="w-12 h-12 flex items-center justify-center">
                 <AppLogo className="w-10 h-10" />
               </div>
               <div>
-                <h1 className="text-lg font-black tracking-tighter uppercase leading-none">Overplast</h1>
+                <h1 className="text-lg font-black tracking-tighter uppercase leading-none text-gray-900">Overplast</h1>
                 <p className="text-[9px] font-bold text-yellow-600 uppercase tracking-tight">Mainframe v2.5</p>
               </div>
             </div>
@@ -413,7 +366,51 @@ const App: React.FC = () => {
         </header>
 
         <div className="p-6 md:p-10 w-full flex-1 overflow-y-auto relative">
-          <div className="w-full max-w-[1600px] mx-auto">
+          <div className="w-full max-w-[1600px] mx-auto space-y-6">
+            {dbError && (
+              <div className="bg-red-50 border-4 border-red-600 p-8 rounded-[2rem] shadow-xl animate-in slide-in-from-top-4 duration-500">
+                 <div className="flex items-start gap-6">
+                   <div className="p-4 bg-red-600 text-white rounded-2xl shadow-lg"><DatabaseZap size={32} /></div>
+                   <div className="flex-1">
+                     <h3 className="text-2xl font-black text-red-900 uppercase tracking-tighter mb-2">Cloud Connectivity Interrupted</h3>
+                     <p className="text-red-700 font-bold mb-4 leading-relaxed">The system could not reach your cloud database. This usually happens if your Supabase URL/Key is incorrect, your internet is disconnected, or Row Level Security (RLS) is blocking access.</p>
+                     <div className="space-y-4">
+                       <div className="bg-white p-4 rounded-xl border border-red-200">
+                         <p className="text-[10px] font-black uppercase text-gray-400 mb-2">Troubleshooting Step 1: Check RLS</p>
+                         <p className="text-xs text-red-900 mb-2">Run this in Supabase SQL Editor:</p>
+                         <div className="bg-gray-900 p-3 rounded-lg text-[10px] font-mono text-green-400 break-all select-all">
+                           ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+                         </div>
+                       </div>
+                       <div className="bg-white p-4 rounded-xl border border-red-200">
+                         <p className="text-[10px] font-black uppercase text-gray-400 mb-2">Troubleshooting Step 2: Check Config</p>
+                         <p className="text-xs text-red-900">Ensure your <span className="font-bold">VITE_SUPABASE_URL</span> and <span className="font-bold">VITE_SUPABASE_ANON_KEY</span> are correctly set in your environment variables.</p>
+                       </div>
+                     </div>
+                     <div className="flex flex-col sm:flex-row gap-4 mt-8">
+                        <button 
+                          onClick={() => window.location.reload()}
+                          className="px-6 py-3 bg-black text-white rounded-xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all flex items-center justify-center gap-3 text-[10px]"
+                        >
+                          <RefreshCw size={14} />
+                          Reload App
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setDbError(false);
+                            fetchInitialData();
+                          }}
+                          className="px-6 py-3 bg-gray-100 text-gray-900 rounded-xl font-black uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center justify-center gap-3 text-[10px]"
+                        >
+                          <Zap size={14} />
+                          Retry Connection
+                        </button>
+                      </div>
+                     <p className="text-red-800 text-[10px] font-black uppercase tracking-widest mt-6">Click the refresh icon in the sidebar after fixing.</p>
+                   </div>
+                 </div>
+              </div>
+            )}
             {ActiveComponent}
           </div>
         </div>

@@ -7,8 +7,8 @@ import {
   Clock, CheckCircle2, AlertCircle, RefreshCw,
   Printer, Download, FileDown, ChevronDown
 } from 'lucide-react';
-// import { jsPDF } from 'jspdf';
-// import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import { APP_LOGO_URL, APP_NAME } from '../constants';
 
 interface ActivityItem {
@@ -163,8 +163,6 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
   }, [activities, searchTerm, filterType, selectedUser, selectedMonth, selectedDate]);
 
   const exportToPdf = async () => {
-    alert("PDF functionality temporarily disabled for debugging.");
-    /*
     setIsGeneratingPdf(true);
     const element = document.getElementById('activity-report-area');
     if (!element) return;
@@ -208,22 +206,69 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
     } finally {
       setIsGeneratingPdf(false);
     }
-    */
   };
 
   const handlePrint = () => {
-    alert("Print functionality temporarily disabled for debugging.");
-    /*
-    const printContent = document.getElementById('activity-report-area');
-    if (!printContent) return;
-    
-    const originalDisplay = printContent.style.display;
-    printContent.style.display = 'block';
-    
-    window.print();
-    
-    printContent.style.display = originalDisplay;
-    */
+    const printArea = document.getElementById('activity-report-area');
+    if (!printArea) {
+      alert("Error: Print area not found.");
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Please allow popups to print.");
+      return;
+    }
+
+    // Temporarily show the hidden report area to get its content correctly
+    const originalDisplay = printArea.style.display;
+    printArea.style.display = 'block';
+    const content = printArea.innerHTML;
+    printArea.style.display = originalDisplay;
+
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map(style => style.outerHTML)
+      .join('\n');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Activity Log Report - ${selectedMonth || 'All'}</title>
+          ${styles}
+          <style>
+            body { 
+              background: white !important; 
+              padding: 40px !important; 
+              margin: 0 !important;
+              color: black !important;
+            }
+            #activity-report-area { 
+              display: block !important; 
+              width: 100% !important; 
+              visibility: visible !important;
+            }
+            .no-print { display: none !important; }
+            @page { margin: 10mm; size: auto; }
+          </style>
+        </head>
+        <body>
+          <div id="activity-report-area">
+            ${content}
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(() => {
+                window.focus();
+                window.print();
+                window.close();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const getTypeIcon = (type: string) => {

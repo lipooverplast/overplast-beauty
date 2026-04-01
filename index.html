@@ -202,27 +202,11 @@
     }
 
     @media print {
-      body * {
-        visibility: hidden;
-      }
-      #printable-invoice-area, #printable-invoice-area * {
-        visibility: visible;
-      }
-      #printable-invoice-area {
-        position: fixed;
-        left: 0;
-        top: 0;
-        width: 100%;
-        margin: 0;
-        padding: 40px;
-        background: white;
-        z-index: 9999;
-      }
       .no-print {
         display: none !important;
       }
       @page {
-        margin: 0;
+        margin: 10mm;
         size: auto;
       }
     }

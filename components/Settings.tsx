@@ -14,7 +14,7 @@ interface SettingsProps {
 
 const SettingsView: React.FC<SettingsProps> = ({ role, userId }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<'general' | 'deployment' | 'hosting'>('hosting');
+  const [activeTab, setActiveTab] = useState<'general'>('general');
   const [cloudUrl, setCloudUrl] = useState(localStorage.getItem('SUPABASE_URL_OVERRIDE') || '');
   const [cloudKey, setCloudKey] = useState(localStorage.getItem('SUPABASE_ANON_KEY_OVERRIDE') || '');
   const [userEmail, setUserEmail] = useState<string>('');
@@ -199,111 +199,46 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, postgres;
     <div className="space-y-8 animate-in fade-in duration-500 pb-20 mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm">
         <div>
-          <h2 className="text-3xl font-black text-gray-900 tracking-tight uppercase">Base Infrastructure</h2>
-          <p className="text-gray-500 font-medium italic">Database Health & Cloud Control Panel.</p>
+          <h2 className="text-3xl font-black text-gray-900 tracking-tight uppercase">System Management</h2>
+          <p className="text-gray-500 font-medium italic">Database Health & Backups Control Panel.</p>
         </div>
         <div className="flex bg-gray-100 p-1.5 rounded-2xl border border-gray-200">
-          <button onClick={() => setActiveTab('hosting')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'hosting' ? 'bg-indigo-700 text-white shadow-lg' : 'text-gray-500'}`}>1. Live Guide</button>
-          <button onClick={() => setActiveTab('deployment')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'deployment' ? 'bg-black text-white shadow-lg' : 'text-gray-500'}`}>2. Cloud Setup</button>
-          <button onClick={() => setActiveTab('general')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'general' ? 'bg-white text-gray-900 shadow-md' : 'text-gray-500'}`}>Backups</button>
+          <button onClick={() => setActiveTab('general')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'general' ? 'bg-black text-white shadow-lg' : 'text-gray-500'}`}>Backups & Maintenance</button>
         </div>
       </div>
 
-      {activeTab === 'hosting' && (
-        <div className="animate-in slide-in-from-bottom-4 duration-500 max-w-5xl mx-auto space-y-12 pb-20">
-            <div className="bg-indigo-950 p-12 md:p-16 rounded-[4rem] text-white shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-12 opacity-5"><Rocket size={160} /></div>
-                <div className="relative z-10">
-                    <h2 className="text-4xl font-black tracking-tighter mb-4 uppercase">App Ko Live Karne Ka Tareeka</h2>
-                    <p className="text-indigo-200 text-lg font-bold mb-12 max-w-2xl">Agar aap chahte hain ke ye app internet par chale aur aap kahin se bhi access kar sakein, to ye steps follow karein:</p>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-white/10 p-8 rounded-[2.5rem] border border-white/10 flex gap-6">
-                            <div className="w-12 h-12 bg-white text-indigo-900 rounded-2xl flex items-center justify-center font-black flex-shrink-0">1</div>
-                            <div>
-                                <h4 className="text-lg font-black uppercase mb-2">Code Download Karein</h4>
-                                <p className="text-sm text-indigo-100/70 leading-relaxed">Pehley upar maujood <span className="text-white font-bold">Download</span> button se saari files apne computer mein save karein.</p>
-                            </div>
-                        </div>
-
-                        <div className="bg-white/10 p-8 rounded-[2.5rem] border border-white/10 flex gap-6">
-                            <div className="w-12 h-12 bg-white text-indigo-900 rounded-2xl flex items-center justify-center font-black flex-shrink-0">2</div>
-                            <div>
-                                <h4 className="text-lg font-black uppercase mb-2">GitHub Par Upload</h4>
-                                <p className="text-sm text-indigo-100/70 leading-relaxed">GitHub.com par account banayein aur apna folder wahan <span className="text-white font-bold">Upload</span> kar dein.</p>
-                                <a href="https://github.com/new" target="_blank" className="inline-flex items-center gap-2 mt-4 text-[10px] font-black uppercase tracking-widest text-indigo-400"><Github size={14}/> Create Repo</a>
-                            </div>
-                        </div>
-
-                        <div className="bg-white/10 p-8 rounded-[2.5rem] border border-white/10 flex gap-6">
-                            <div className="w-12 h-12 bg-white text-indigo-900 rounded-2xl flex items-center justify-center font-black flex-shrink-0">3</div>
-                            <div>
-                                <h4 className="text-lg font-black uppercase mb-2">Vercel Se Connect</h4>
-                                <p className="text-sm text-indigo-100/70 leading-relaxed">Vercel.com par jayein aur apni GitHub repository select karke <span className="text-white font-bold">Deploy</span> karein.</p>
-                                <a href="https://vercel.com/new" target="_blank" className="inline-flex items-center gap-2 mt-4 text-[10px] font-black uppercase tracking-widest text-indigo-400"><ExternalLink size={14}/> Open Vercel</a>
-                            </div>
-                        </div>
-
-                        <div className="bg-white/10 p-8 rounded-[2.5rem] border border-white/10 flex gap-6">
-                            <div className="w-12 h-12 bg-white text-indigo-900 rounded-2xl flex items-center justify-center font-black flex-shrink-0">4</div>
-                            <div>
-                                <h4 className="text-lg font-black uppercase mb-2">Keys (Env Vars)</h4>
-                                <p className="text-sm text-indigo-100/70 leading-relaxed">Vercel ki settings mein <span className="text-white font-bold">API_KEY</span> aur Supabase keys add karna zaroori hai.</p>
-                            </div>
-                        </div>
-                    </div>
+      {activeTab === 'general' && (
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-500">
+             <div className="bg-white p-10 rounded-[3rem] border border-gray-200 shadow-sm flex flex-col justify-between">
+                <div>
+                  <h4 className="font-black text-gray-900 text-lg mb-2 uppercase tracking-tight">Ledger Export</h4>
+                  <p className="text-sm text-gray-500 font-medium">Download full business state as JSON for safe keeping.</p>
                 </div>
-            </div>
-        </div>
-      )}
-
-      {activeTab === 'deployment' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in fade-in duration-500">
-          <div className="lg:col-span-6 space-y-6">
-            <div className="bg-white p-10 rounded-[3rem] border-4 border-black shadow-2xl">
-                <div className="flex items-center gap-4 mb-8">
-                  <div className="w-12 h-12 bg-black text-white rounded-xl flex items-center justify-center">
-                    <Server size={24} />
-                  </div>
-                  <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">1. Link Database</h3>
-                </div>
-                <div className="space-y-6">
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Supabase URL</label>
-                        <input type="text" placeholder="https://xyz.supabase.co" value={cloudUrl} onChange={(e) => setCloudUrl(e.target.value)} className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm outline-none transition-all" />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Anon Key</label>
-                        <textarea rows={2} placeholder="Paste public anon key..." value={cloudKey} onChange={(e) => setCloudKey(e.target.value)} className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm outline-none transition-all resize-none" />
-                    </div>
-                    <button onClick={handleSaveCloudConfig} className="w-full py-5 bg-black text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl hover:bg-gray-900 transition-all">
-                        Establish Cloud Connection
-                    </button>
-                </div>
-            </div>
-
-            <div className="bg-amber-50 p-10 rounded-[3rem] border-2 border-amber-200 shadow-xl">
-                <div className="flex items-center gap-3 mb-4">
-                   <ShieldAlert size={24} className="text-amber-600" />
-                   <h3 className="text-2xl font-black uppercase tracking-tight text-amber-900">Admin Rescue</h3>
-                </div>
-                <p className="text-xs text-amber-800 mb-6 font-bold leading-relaxed">Run this if you are stuck as 'Staff':</p>
-                <div className="bg-white p-4 rounded-xl border border-amber-200 mb-6 font-mono text-[10px] text-amber-900 break-all select-all">
-                  UPDATE profiles SET role = 'Admin' WHERE email = '{userEmail || 'YOUR_EMAIL'}';
-                </div>
-                <button onClick={() => { navigator.clipboard.writeText(`UPDATE profiles SET role = 'Admin' WHERE email = '${userEmail}';`); alert("Rescue SQL Copied!"); }} className="w-full py-4 bg-amber-600 text-white rounded-xl font-black uppercase tracking-widest text-[9px] hover:bg-amber-700 transition-all flex items-center justify-center gap-3 shadow-xl">
-                  Copy Rescue SQL
+                <button onClick={() => db.exportDatabase(role === 'Admin' ? undefined : userId)} className="mt-10 py-5 bg-black text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
+                  <Download size={16} /> Export JSON
                 </button>
-            </div>
+             </div>
+             {role === 'Admin' && (
+               <div className="bg-red-50 p-10 rounded-[3rem] border border-red-100 flex flex-col justify-between">
+                  <div>
+                    <h4 className="font-black text-red-900 text-lg mb-2 uppercase tracking-tight">Erase Node</h4>
+                    <p className="text-sm text-red-700 font-medium">Clear system configuration and unlink database.</p>
+                  </div>
+                  <button onClick={() => { if(confirm('Terminate app link?')) clearSupabaseConfig(); }} className="mt-10 py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
+                    <Trash2 size={16} /> Wipe System
+                  </button>
+               </div>
+             )}
           </div>
-          
-          <div className="lg:col-span-6 space-y-6">
+
+          {role === 'Admin' && (
             <div className="bg-black p-10 rounded-[3.5rem] text-white shadow-2xl border border-gray-800">
                 <div className="flex items-center gap-4 mb-8">
                    <Code size={32} className="text-yellow-500" />
                    <div>
-                      <h3 className="text-2xl font-black uppercase tracking-tight">2. Repair Tables</h3>
-                      <p className="text-xs text-yellow-500 font-black uppercase tracking-widest">Mandatory Step</p>
+                      <h3 className="text-2xl font-black uppercase tracking-tight">Database Repair</h3>
+                      <p className="text-xs text-yellow-500 font-black uppercase tracking-widest">Maintenance Tool</p>
                    </div>
                 </div>
                 
@@ -317,7 +252,6 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, postgres;
                           <li>Open your <span className="text-white">Supabase Dashboard</span>.</li>
                           <li>Go to the <span className="text-white">"SQL Editor"</span> tab on the left.</li>
                           <li>Paste the code and click the <span className="text-yellow-500">"RUN"</span> button.</li>
-                          <li>Refresh this app to start saving subscriptions.</li>
                        </ol>
                     </div>
 
@@ -326,38 +260,7 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, postgres;
                     </button>
                 </div>
             </div>
-
-            <div className="bg-white p-10 rounded-[2.5rem] border border-gray-200 shadow-sm">
-                <div className="w-16 h-16 bg-yellow-50 text-yellow-600 rounded-2xl flex items-center justify-center mb-6 border border-yellow-100"><ShieldCheck size={32} /></div>
-                <h3 className="text-xl font-black text-gray-900 mb-4 uppercase tracking-tighter">Database Security</h3>
-                <p className="text-gray-500 text-xs font-medium leading-relaxed">Our system uses Row Level Security (RLS) to protect data. Always ensure the SQL Setup script has been run to allow access to all authenticated users.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'general' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-500">
-           <div className="bg-white p-10 rounded-[3rem] border border-gray-200 shadow-sm flex flex-col justify-between">
-              <div>
-                <h4 className="font-black text-gray-900 text-lg mb-2 uppercase tracking-tight">Ledger Export</h4>
-                <p className="text-sm text-gray-500 font-medium">Download full business state as JSON.</p>
-              </div>
-              <button onClick={() => db.exportDatabase(role === 'Admin' ? undefined : userId)} className="mt-10 py-5 bg-black text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
-                <Download size={16} /> Export JSON
-              </button>
-           </div>
-           {role === 'Admin' && (
-             <div className="bg-red-50 p-10 rounded-[3rem] border border-red-100 flex flex-col justify-between">
-                <div>
-                  <h4 className="font-black text-red-900 text-lg mb-2 uppercase tracking-tight">Erase Node</h4>
-                  <p className="text-sm text-red-700 font-medium">Clear system configuration and unlink database.</p>
-                </div>
-                <button onClick={() => { if(confirm('Terminate app link?')) clearSupabaseConfig(); }} className="mt-10 py-5 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
-                  <Trash2 size={16} /> Wipe System
-                </button>
-             </div>
-           )}
+          )}
         </div>
       )}
     </div>

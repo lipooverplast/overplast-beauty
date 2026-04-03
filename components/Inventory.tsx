@@ -538,7 +538,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       </td>
                       <td className="px-6 py-5 text-center">
                          <div className="text-sm font-black text-gray-900">Rs. {(product.mrp || 0).toFixed(2)}</div>
-                         <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">PP: Rs. {(product.purchasePrice || 0).toFixed(2)}</div>
+                         {role === 'Admin' && <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">PP: Rs. {(product.purchasePrice || 0).toFixed(2)}</div>}
                       </td>
                       <td className="px-6 py-5 text-center">
                          <div className="text-sm font-black text-yellow-700">Rs. {(product.tp || 0).toFixed(2)}</div>
@@ -962,7 +962,11 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       </div>
                       <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label><input required type="number" step="0.01" name="mrp" defaultValue={defaultMrp} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-black" /></div>
                       <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label><input required type="number" step="0.01" name="tp" defaultValue={defaultTp} className="w-full px-5 py-4 bg-yellow-50/30 border border-yellow-100 rounded-2xl font-black" /></div>
-                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label><input required type="number" step="0.01" name="purchasePrice" defaultValue={defaultPp} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" /></div>
+                      {role === 'Admin' ? (
+                        <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label><input required type="number" step="0.01" name="purchasePrice" defaultValue={defaultPp} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" /></div>
+                      ) : (
+                        <input type="hidden" name="purchasePrice" value={defaultPp} />
+                      )}
                       <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Stock Quantity</label><input required type="number" name="stock" defaultValue={editingProduct?.stock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
                       <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Alert Level (Min Stock)</label><input required type="number" name="minStock" defaultValue={defaultMinStock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
                       <div className="md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Description</label><textarea name="description" defaultValue={defaultDescription} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm" rows={2} /></div>

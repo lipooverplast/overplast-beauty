@@ -72,6 +72,8 @@ const AdminOffice: React.FC<{
     totalProfit: 0,
     totalCost: 0,
     totalTax: 0,
+    totalInvoiceExpenses: 0,
+    expenseBreakdown: [] as { type: string, amount: number }[],
     pendingAmount: 0,
     dbSize: '0 KB',
   });
@@ -127,6 +129,18 @@ const AdminOffice: React.FC<{
       
       const rev = monthlyInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
       const tax = monthlyInvoices.reduce((sum, inv) => sum + (inv.taxTotal || 0), 0);
+      const invoiceExpenses = monthlyInvoices.reduce((sum, inv) => sum + (inv.expenseAmount || 0), 0);
+      
+      const expenseMap: Record<string, number> = {};
+      monthlyInvoices.forEach(inv => {
+        if (inv.expenseAmount && inv.expenseAmount > 0) {
+          const type = inv.expenseType || 'General Expense';
+          expenseMap[type] = (expenseMap[type] || 0) + inv.expenseAmount;
+        }
+      });
+      
+      const breakdown = Object.entries(expenseMap).map(([type, amount]) => ({ type, amount }));
+
       const pending = monthlyInvoices.reduce((sum, inv) => {
         const paid = inv.paymentMethod === 'Cash' ? inv.total : (inv.paidAmount || 0);
         return sum + (inv.total - paid);
@@ -141,7 +155,7 @@ const AdminOffice: React.FC<{
         });
       });
 
-      const profit = (rev - tax) - cost;
+      const profit = (rev - tax) - cost - invoiceExpenses;
 
       setStats({
         totalUsers: profiles.length,
@@ -150,6 +164,8 @@ const AdminOffice: React.FC<{
         totalProfit: profit,
         totalCost: cost,
         totalTax: tax,
+        totalInvoiceExpenses: invoiceExpenses,
+        expenseBreakdown: breakdown,
         pendingAmount: pending,
         dbSize: `${(profiles.length * 0.2 + invoices.length * 0.8 + products.length * 0.4).toFixed(1)} KB`,
       });
@@ -179,8 +195,8 @@ const AdminOffice: React.FC<{
         const purchasePrice = product?.purchasePrice || 0;
         invCost += purchasePrice * (item.quantity || 0); 
       });
-      const invProfit = (inv.total - inv.taxTotal) - invCost;
-      const invDebit = invCost + inv.taxTotal;
+      const invProfit = (inv.total - inv.taxTotal) - invCost - (inv.expenseAmount || 0);
+      const invDebit = invCost + inv.taxTotal + (inv.expenseAmount || 0);
       
       if (!dailyData[date]) dailyData[date] = { date, day, revenue: 0, debit: 0, profit: 0, invoices: [] };
       dailyData[date].revenue += inv.total;
@@ -661,21 +677,39 @@ const AdminOffice: React.FC<{
                                 <span className="text-lg font-black text-green-600">Rs. {(stats.totalRevenue || 0).toLocaleString()}</span>
                               </div>
                               <div className="flex justify-between items-center">
-                                <span className="text-sm font-bold text-gray-600 uppercase tracking-widest">Total Expenses (COGS + Tax)</span>
+                                <span className="text-sm font-bold text-gray-600 uppercase tracking-widest">Total COGS + Tax</span>
                                 <span className="text-lg font-black text-red-600">Rs. {(stats.totalCost + stats.totalTax || 0).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-sm font-bold text-red-500 uppercase tracking-widest">Invoice Expenses</span>
+                                <span className="text-lg font-black text-red-500">Rs. {(stats.totalInvoiceExpenses || 0).toLocaleString()}</span>
                               </div>
                              <div className="flex justify-between items-center">
                                <span className="text-sm font-bold text-amber-600 uppercase tracking-widest">Pending Collection</span>
                                <span className="text-lg font-black text-amber-600">Rs. {(stats.pendingAmount || 0).toLocaleString()}</span>
                              </div>
                              <div className="pt-4 border-t border-gray-50 flex justify-between items-center">
-                               <span className="text-sm font-bold text-gray-400">Tax Component</span>
-                               <span className="text-sm font-black text-gray-500">Rs. {(stats.totalTax || 0).toLocaleString()}</span>
+                               <span className="text-sm font-bold text-gray-400">Net Profit</span>
+                               <span className={`text-lg font-black ${stats.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>Rs. {(stats.totalProfit || 0).toLocaleString()}</span>
                              </div>
                           </div>
                        </div>
                     </div>
-                    <div></div>
+                    <div>
+                      <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 border-b border-gray-100 pb-4">Expense Breakdown</h4>
+                      <div className="space-y-4">
+                        {stats.expenseBreakdown.length > 0 ? stats.expenseBreakdown.map((exp, i) => (
+                          <div key={i} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                            <span className="text-xs font-black text-gray-900 uppercase tracking-widest">{exp.type}</span>
+                            <span className="text-sm font-black text-red-600">Rs. {exp.amount.toLocaleString()}</span>
+                          </div>
+                        )) : (
+                          <div className="py-8 text-center opacity-30 border-2 border-dashed border-gray-100 rounded-2xl">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">No Expenses Recorded</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Date-wise Ledger Section */}
@@ -721,6 +755,7 @@ const AdminOffice: React.FC<{
                                       <th className="py-4">Invoice #</th>
                                       <th className="py-4">Client</th>
                                       <th className="py-4 text-right">Revenue</th>
+                                      <th className="py-4 text-right">Expense</th>
                                       <th className="py-4 text-right">Action</th>
                                     </tr>
                                   </thead>
@@ -730,6 +765,14 @@ const AdminOffice: React.FC<{
                                         <td className="py-4 font-black text-gray-900 text-xs">{inv.invoiceNumber}</td>
                                         <td className="py-4 font-bold text-gray-600 text-xs">{inv.clientName}</td>
                                         <td className="py-4 text-right font-black text-gray-900 text-xs">Rs. {(inv.total || 0).toLocaleString()}</td>
+                                        <td className="py-4 text-right font-black text-red-600 text-xs">
+                                          {inv.expenseAmount > 0 ? (
+                                            <div className="flex flex-col items-end">
+                                              <span>Rs. {inv.expenseAmount.toLocaleString()}</span>
+                                              <span className="text-[8px] uppercase text-gray-400">{inv.expenseType}</span>
+                                            </div>
+                                          ) : '-'}
+                                        </td>
                                         <td className="py-4 text-right">
                                           <button 
                                             onClick={() => onNavigate('invoices')}
@@ -760,21 +803,27 @@ const AdminOffice: React.FC<{
                         <thead>
                           <tr className="bg-gray-100 text-gray-900 border-b border-gray-200">
                             <th className="p-6 text-[10px] font-black uppercase tracking-widest">Date</th>
-                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Credit</th>
-                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Debit</th>
+                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Credit (Rev)</th>
+                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Debit (COGS+Tax)</th>
+                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Inv Expenses</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                          {chartData.map((day, idx) => (
-                            <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                              <td className="p-6">
-                                <p className="text-xs font-black text-gray-900">{day.date}</p>
-                                <p className="text-[9px] font-bold text-gray-400 uppercase">{new Date(day.date).toLocaleDateString('en-PK', { weekday: 'short' })}</p>
-                              </td>
-                              <td className="p-6 text-right font-black text-green-600 text-sm">Rs. {(day.revenue || 0).toLocaleString()}</td>
-                              <td className="p-6 text-right font-black text-red-600 text-sm">Rs. {(day.debit || 0).toLocaleString()}</td>
-                            </tr>
-                          ))}
+                          {chartData.map((day, idx) => {
+                            const dailyInvExpenses = day.invoices.reduce((sum: number, inv: any) => sum + (inv.expenseAmount || 0), 0);
+                            const dailyCogsTax = day.debit - dailyInvExpenses;
+                            return (
+                              <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                                <td className="p-6">
+                                  <p className="text-xs font-black text-gray-900">{day.date}</p>
+                                  <p className="text-[9px] font-bold text-gray-400 uppercase">{new Date(day.date).toLocaleDateString('en-PK', { weekday: 'short' })}</p>
+                                </td>
+                                <td className="p-6 text-right font-black text-green-600 text-sm">Rs. {(day.revenue || 0).toLocaleString()}</td>
+                                <td className="p-6 text-right font-black text-red-600 text-sm">Rs. {dailyCogsTax.toLocaleString()}</td>
+                                <td className="p-6 text-right font-black text-red-400 text-sm">Rs. {dailyInvExpenses.toLocaleString()}</td>
+                              </tr>
+                            );
+                          })}
                           {chartData.length === 0 && (
                             <tr>
                               <td colSpan={3} className="p-20 text-center text-xs font-black text-gray-400 uppercase tracking-widest">No data available</td>
@@ -786,6 +835,7 @@ const AdminOffice: React.FC<{
                             <td className="p-6 font-black text-gray-900 uppercase text-[10px] tracking-widest">Monthly Totals</td>
                             <td className="p-6 text-right font-black text-green-700 text-lg">Rs. {(stats.totalRevenue || 0).toLocaleString()}</td>
                             <td className="p-6 text-right font-black text-red-700 text-lg">Rs. {(stats.totalCost + stats.totalTax || 0).toLocaleString()}</td>
+                            <td className="p-6 text-right font-black text-red-500 text-lg">Rs. {(stats.totalInvoiceExpenses || 0).toLocaleString()}</td>
                           </tr>
                         </tfoot>
                       </table>

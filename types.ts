@@ -93,6 +93,8 @@ export interface Invoice {
   taxRate: number; 
   taxTotal: number;
   total: number;
+  expenseType?: string;
+  expenseAmount?: number;
   status: 'Paid' | 'Pending' | 'Overdue' | 'Returned';
   paymentMethod: 'Cash' | 'Credit';
   paidAmount?: number;

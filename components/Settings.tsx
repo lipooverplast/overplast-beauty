@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   status TEXT DEFAULT 'Pending',
   payment_method TEXT DEFAULT 'Cash',
   sales_person TEXT,
+  expense_type TEXT,
+  expense_amount NUMERIC DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -169,6 +171,8 @@ ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS paid_amount NUMERIC DEFAULT
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_rate NUMERIC DEFAULT 0;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_total NUMERIC DEFAULT 0;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS tax_total NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS expense_type TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS expense_amount NUMERIC DEFAULT 0;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS discount_rate NUMERIC DEFAULT 0;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS discount_total NUMERIC DEFAULT 0;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS tax_rate NUMERIC DEFAULT 0;

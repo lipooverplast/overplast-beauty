@@ -380,6 +380,8 @@ export const db = {
           discountTotal: Number(inv.discount_total || 0),
           taxRate: Number(inv.tax_rate),
           taxTotal: Number(inv.tax_total), total: Number(inv.total),
+          expenseType: inv.expense_type || '',
+          expenseAmount: Number(inv.expense_amount || 0),
           status: inv.status, 
           paymentMethod: inv.payment_method || 'Cash',
           paidAmount: Number(inv.paid_amount || 0),
@@ -427,7 +429,10 @@ export const db = {
           discount_rate: inv.discountRate || 0,
           discount_total: inv.discountTotal || 0,
           tax_rate: inv.taxRate,
-          tax_total: inv.taxTotal, total: inv.total, status: inv.status, 
+          tax_total: inv.taxTotal, total: inv.total, 
+          expense_type: inv.expenseType || '',
+          expense_amount: inv.expenseAmount || 0,
+          status: inv.status, 
           payment_method: inv.paymentMethod || 'Cash',
           paid_amount: inv.paidAmount || 0,
           sales_person: inv.salesPerson || ''
@@ -437,7 +442,7 @@ export const db = {
       const { error } = await withRetry(() => supabase.from('invoices').upsert(dbRows));
       if (error) {
         if (error.code === '42703' || error.message.includes('column')) {
-          throw new Error("Missing 'discount', 'tax', or 'sales_person' columns in 'invoices' table. Please run the Repair Script in Settings.");
+          throw new Error("Missing schema updates (discount, tax, sales_person, or expense columns) in 'invoices' table. Please run the Repair Script in Settings.");
         }
         throw new Error(error.message);
       }

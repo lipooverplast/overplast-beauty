@@ -62,6 +62,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [taxRate, setTaxRate] = useState(0);
   const [discountRate, setDiscountRate] = useState(0);
   const [salesPerson, setSalesPerson] = useState('');
+  const [expenseType, setExpenseType] = useState('');
+  const [expenseAmount, setExpenseAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit'>('Cash');
   const [activeAssetId, setActiveAssetId] = useState(''); 
   const [assetSearchTerm, setAssetSearchTerm] = useState('');
@@ -123,7 +125,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const subtotal = grossSubtotal;
   const discountTotal = totalItemDiscount + globalDiscountAmount;
   const taxTotal = (grossSubtotal - discountTotal) * (taxRate / 100);
-  const grandTotal = grossSubtotal - discountTotal + taxTotal;
+  const grandTotal = grossSubtotal - discountTotal + taxTotal + expenseAmount;
 
   const addItem = (productId: string) => {
     const product = filteredProducts.find(p => p.id === productId);
@@ -234,6 +236,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       taxRate,
       taxTotal,
       total: grandTotal,
+      expenseType: expenseType,
+      expenseAmount: expenseAmount,
       status: paymentMethod === 'Cash' ? 'Paid' : 'Pending',
       paymentMethod: paymentMethod,
       paidAmount: paymentMethod === 'Cash' ? grandTotal : 0,
@@ -276,6 +280,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       setSelectedClientId('');
       setActiveAssetId('');
       setSalesPerson('');
+      setExpenseType('');
+      setExpenseAmount(0);
       alert("Statement committed successfully. Stock updated.");
     } catch (err: any) {
       console.error("Invoice Creation Error:", err);
@@ -844,6 +850,29 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Expense Type (TCS, Cash, Indrive etc.)</label>
+                  <input 
+                    type="text" 
+                    value={expenseType} 
+                    onChange={e => setExpenseType(e.target.value)} 
+                    placeholder="e.g. TCS, Cash, Easypaisa, Indrive..."
+                    className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-black outline-none" 
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Expense Amount (Rs.)</label>
+                  <input 
+                    type="number" 
+                    value={expenseAmount} 
+                    onChange={e => setExpenseAmount(parseFloat(e.target.value) || 0)} 
+                    placeholder="0"
+                    className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-black outline-none text-center" 
+                  />
+                </div>
+              </div>
+
               <div className="border border-gray-100 rounded-[2.5rem] overflow-hidden bg-white shadow-xl">
                 <table className="w-full text-left">
                   <thead className="bg-gray-50 text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] border-b">
@@ -1090,6 +1119,13 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingInvoice.taxRate}%)</td>
                       <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingInvoice.taxTotal || 0).toLocaleString()}</td>
                     </tr>
+                    {viewingInvoice.expenseAmount && viewingInvoice.expenseAmount > 0 ? (
+                      <tr>
+                        <td colSpan={5}></td>
+                        <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Expenses ({viewingInvoice.expenseType || 'Other'})</td>
+                        <td className="py-2 text-right font-black text-gray-900 text-xl">Rs. {viewingInvoice.expenseAmount.toLocaleString()}</td>
+                      </tr>
+                    ) : null}
                     <tr>
                       <td colSpan={5}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>

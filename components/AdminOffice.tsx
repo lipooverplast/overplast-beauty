@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { Profile, UserRole, UserStatus, Invoice, Product, ViewType, Client, StockTransaction } from '../types';
 import { 
@@ -64,6 +64,43 @@ const AdminOffice: React.FC<{
 }> = ({ onUpdate, onNavigate, invoices: propInvoices, clients: propClients, products: propProducts, userId, userEmail, role }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'activity' | 'infrastructure' | 'reports' | 'intelligence' | 'security' | 'sales-report'>('intelligence');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
+  const [currentYear, currentMonth] = selectedMonth.split('-').map(Number);
+
+  const handleMonthChange = (m: number) => {
+    const monthStr = m.toString().padStart(2, '0');
+    setSelectedMonth(`${currentYear}-${monthStr}`);
+  };
+
+  const handleYearChange = (y: number) => {
+    const monthStr = currentMonth.toString().padStart(2, '0');
+    setSelectedMonth(`${y}-${monthStr}`);
+  };
+
+  const handlePrevMonth = () => {
+    let m = currentMonth - 1;
+    let y = currentYear;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+    setSelectedMonth(`${y}-${m.toString().padStart(2, '0')}`);
+  };
+
+  const handleNextMonth = () => {
+    let m = currentMonth + 1;
+    let y = currentYear;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    setSelectedMonth(`${y}-${m.toString().padStart(2, '0')}`);
+  };
+
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -78,6 +115,11 @@ const AdminOffice: React.FC<{
     dbSize: '0 KB',
   });
   const [allInvoices, setAllInvoices] = useState<Invoice[]>(propInvoices || []);
+  const activeMonths = useMemo(() => {
+    const monthsSet = new Set<string>();
+    allInvoices.forEach(inv => monthsSet.add(inv.date.slice(0, 7)));
+    return Array.from(monthsSet).sort((a, b) => b.localeCompare(a));
+  }, [allInvoices]);
   const [allProducts, setAllProducts] = useState<Product[]>(propProducts || []);
   const [allTransactions, setAllTransactions] = useState<StockTransaction[]>([]);
   const [loading, setLoading] = useState(!propInvoices);
@@ -282,6 +324,71 @@ const AdminOffice: React.FC<{
     }
   };
 
+  const handlePrint = () => {
+    const printArea = document.getElementById('monthly-report-area');
+    if (!printArea) {
+      window.print();
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Please allow popups to print.");
+      return;
+    }
+
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map(style => style.outerHTML)
+      .join('\n');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Admin Ledger Report - ${new Date().toLocaleDateString()}</title>
+          ${styles}
+          <style>
+            body { 
+              background: white !important; 
+              padding: 20px !important; 
+              margin: 0 !important;
+              color: black !important;
+            }
+            .no-print { display: none !important; }
+            * { 
+              color: black !important; 
+              border-color: #e5e7eb !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .bg-black, .bg-gray-900, .bg-gray-800 { 
+              background: white !important; 
+              border: 1px solid #e5e7eb !important; 
+            }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 9px; }
+            .rounded-[3rem], .rounded-[2.5rem] { border-radius: 0 !important; }
+            .shadow-2xl, .shadow-lg, .shadow-xl { box-shadow: none !important; }
+          </style>
+        </head>
+        <body>
+          <div class="print-container">
+            ${printArea.innerHTML}
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(() => {
+                window.focus();
+                window.print();
+                window.close();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const exportReportToPdf = async () => {
     setIsGeneratingPdf(true);
     const element = document.getElementById('monthly-report-area');
@@ -380,7 +487,7 @@ const AdminOffice: React.FC<{
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-700 pb-20">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 bg-white p-8 rounded-[3rem] border border-gray-100 shadow-sm">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 bg-white p-8 rounded-[3rem] border border-gray-100 shadow-sm no-print">
         <div className="flex items-center gap-6">
            <div className="p-4 bg-black text-yellow-500 rounded-2xl shadow-lg">
               <Shield size={32} />
@@ -636,20 +743,76 @@ const AdminOffice: React.FC<{
                 invoices={allInvoices}
                 transactions={allTransactions}
                 role={role || 'Staff'}
+                userId={userId || ''}
               />
             )}
             {activeTab === 'reports' && (
-              <div className="space-y-10 animate-in fade-in zoom-in-95 duration-500">
-                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
-                   <div className="flex items-center gap-6">
+              <div className="space-y-10 animate-in fade-in zoom-in-95 duration-500 print:p-0 print:bg-white print:space-y-0">
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 no-print">
+                   <div className="flex items-center gap-6 p-2 rounded-2xl transition-all">
                       <div className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl"><Calendar size={24} /></div>
                       <div>
                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Reporting Period</p>
-                        <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="font-black text-gray-900 border-none bg-transparent focus:ring-0 text-2xl outline-none cursor-pointer" />
+                        <div className="flex flex-col gap-3">
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={handlePrevMonth}
+                              className="p-1.5 bg-gray-50 text-gray-400 rounded-lg hover:text-black hover:bg-gray-100 transition-all"
+                            >
+                              <ChevronDown className="rotate-90" size={14} />
+                            </button>
+                            
+                            <select 
+                              value={currentMonth}
+                              onChange={(e) => handleMonthChange(Number(e.target.value))}
+                              className="bg-transparent text-gray-900 font-black text-lg border-none focus:ring-0 cursor-pointer appearance-none pr-2"
+                            >
+                              {months.map((m, i) => (
+                                <option key={m} value={i + 1} className="bg-white text-gray-900">{m}</option>
+                              ))}
+                            </select>
+
+                            <select 
+                              value={currentYear}
+                              onChange={(e) => handleYearChange(Number(e.target.value))}
+                              className="bg-transparent text-gray-900 font-black text-lg border-none focus:ring-0 cursor-pointer appearance-none"
+                            >
+                              {years.map(y => (
+                                <option key={y} value={y} className="bg-white text-gray-900">{y}</option>
+                              ))}
+                            </select>
+
+                            <button 
+                              onClick={handleNextMonth}
+                              className="p-1.5 bg-gray-50 text-gray-400 rounded-lg hover:text-black hover:bg-gray-100 transition-all"
+                            >
+                              <ChevronDown className="-rotate-90" size={14} />
+                            </button>
+                          </div>
+                          
+                          {/* Active Months Quick Select */}
+                          {activeMonths.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {activeMonths.slice(0, 5).map(m => (
+                                <button
+                                  key={m}
+                                  onClick={() => setSelectedMonth(m)}
+                                  className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase transition-all ${
+                                    selectedMonth === m 
+                                      ? 'bg-indigo-600 text-white shadow-md' 
+                                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600'
+                                  }`}
+                                >
+                                  {new Date(m + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                    </div>
                    <div className="flex items-center gap-3">
-                      <button onClick={() => window.print()} className="flex items-center gap-3 px-8 py-4 bg-white border border-gray-200 rounded-2xl font-black text-[10px] uppercase hover:bg-gray-50 transition-all"><Printer size={18} /> Print</button>
+                      <button onClick={handlePrint} className="flex items-center gap-3 px-8 py-4 bg-white border border-gray-200 rounded-2xl font-black text-[10px] uppercase hover:bg-gray-50 transition-all"><Printer size={18} /> Print</button>
                       <button onClick={exportReportToPdf} disabled={isGeneratingPdf} className="flex items-center gap-3 px-8 py-4 bg-white border border-gray-200 text-gray-900 rounded-2xl font-black text-[10px] uppercase hover:bg-gray-50 transition-all">
                         {isGeneratingPdf ? <Loader2 className="animate-spin text-yellow-500" size={18} /> : <Download size={18} />} Export PDF
                       </button>
@@ -659,52 +822,52 @@ const AdminOffice: React.FC<{
                    </div>
                 </div>
 
-                <div className="bg-white p-16 md:p-24 rounded-[3.5rem] border border-gray-200 shadow-2xl relative overflow-hidden" id="monthly-report-area">
-                  <div className="flex justify-between items-start mb-24">
+                <div className="bg-white p-16 md:p-24 rounded-[3.5rem] border border-gray-200 shadow-2xl relative overflow-hidden print:border-none print:shadow-none print:p-4" id="monthly-report-area">
+                  <div className="flex justify-between items-start mb-24 print:mb-12">
                     <AdminLogo />
-                    <div className="text-right">
+                    <div className="text-right no-print">
                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Auth Status</p>
                        <span className="px-5 py-2 bg-green-50 text-green-700 border border-green-200 rounded-full text-[10px] font-black uppercase tracking-widest">Verified Ledger</span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-24">
-                    <div className="space-y-12">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-24 print:gap-12 print:grid-cols-2">
+                    <div className="space-y-12 print:space-y-6">
                        <div>
-                          <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 border-b border-gray-100 pb-4">Financial Summary</h4>
-                          <div className="space-y-6">
+                          <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 border-b border-gray-100 pb-4 print:mb-4">Financial Summary</h4>
+                          <div className="space-y-6 print:space-y-2">
                               <div className="flex justify-between items-center">
-                                <span className="text-sm font-bold text-gray-600 uppercase tracking-widest">Gross Revenue (Total Sales)</span>
-                                <span className="text-lg font-black text-green-600">Rs. {(stats.totalRevenue || 0).toLocaleString()}</span>
+                                <span className="text-sm font-bold text-gray-600 uppercase tracking-widest print:text-[10px]">Gross Revenue (Total Sales)</span>
+                                <span className="text-lg font-black text-green-600 print:text-sm">Rs. {(stats.totalRevenue || 0).toLocaleString()}</span>
                               </div>
                               <div className="flex justify-between items-center">
-                                <span className="text-sm font-bold text-gray-600 uppercase tracking-widest">Total COGS + Tax</span>
-                                <span className="text-lg font-black text-red-600">Rs. {(stats.totalCost + stats.totalTax || 0).toLocaleString()}</span>
+                                <span className="text-sm font-bold text-gray-600 uppercase tracking-widest print:text-[10px]">Total COGS + Tax</span>
+                                <span className="text-lg font-black text-red-600 print:text-sm">Rs. {(stats.totalCost + stats.totalTax || 0).toLocaleString()}</span>
                               </div>
                               <div className="flex justify-between items-center">
-                                <span className="text-sm font-bold text-red-500 uppercase tracking-widest">Invoice Expenses</span>
-                                <span className="text-lg font-black text-red-500">Rs. {(stats.totalInvoiceExpenses || 0).toLocaleString()}</span>
+                                <span className="text-sm font-bold text-red-500 uppercase tracking-widest print:text-[10px]">Invoice Expenses</span>
+                                <span className="text-lg font-black text-red-500 print:text-sm">Rs. {(stats.totalInvoiceExpenses || 0).toLocaleString()}</span>
                               </div>
                              <div className="flex justify-between items-center">
-                               <span className="text-sm font-bold text-amber-600 uppercase tracking-widest">Pending Collection</span>
-                               <span className="text-lg font-black text-amber-600">Rs. {(stats.pendingAmount || 0).toLocaleString()}</span>
+                               <span className="text-sm font-bold text-amber-600 uppercase tracking-widest print:text-[10px]">Pending Collection</span>
+                               <span className="text-lg font-black text-amber-600 print:text-sm">Rs. {(stats.pendingAmount || 0).toLocaleString()}</span>
                              </div>
-                             <div className="pt-4 border-t border-gray-50 flex justify-between items-center">
-                               <span className="text-sm font-bold text-gray-400">Net Profit</span>
-                               <span className={`text-lg font-black ${stats.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>Rs. {(stats.totalProfit || 0).toLocaleString()}</span>
+                             <div className="pt-4 border-t border-gray-50 flex justify-between items-center print:pt-2">
+                               <span className="text-sm font-bold text-gray-400 print:text-[10px]">Net Profit</span>
+                               <span className={`text-lg font-black print:text-sm ${stats.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>Rs. {(stats.totalProfit || 0).toLocaleString()}</span>
                              </div>
                           </div>
                        </div>
                     </div>
                     <div>
-                      <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 border-b border-gray-100 pb-4">Expense Breakdown</h4>
-                      <div className="space-y-4">
+                      <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 border-b border-gray-100 pb-4 print:mb-4">Expense Breakdown</h4>
+                      <div className="space-y-4 print:space-y-2">
                         {stats.expenseBreakdown.length > 0 ? stats.expenseBreakdown.map((exp, i) => (
-                          <div key={i} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                            <span className="text-xs font-black text-gray-900 uppercase tracking-widest">{exp.type}</span>
-                            <span className="text-sm font-black text-red-600">Rs. {exp.amount.toLocaleString()}</span>
+                          <div key={i} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100 print:p-2 print:bg-white">
+                            <span className="text-xs font-black text-gray-900 uppercase tracking-widest print:text-[10px]">{exp.type}</span>
+                            <span className="text-sm font-black text-red-600 print:text-[10px]">Rs. {exp.amount.toLocaleString()}</span>
                           </div>
                         )) : (
-                          <div className="py-8 text-center opacity-30 border-2 border-dashed border-gray-100 rounded-2xl">
+                          <div className="py-8 text-center opacity-30 border-2 border-dashed border-gray-100 rounded-2xl print:py-4">
                             <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">No Expenses Recorded</p>
                           </div>
                         )}
@@ -713,8 +876,8 @@ const AdminOffice: React.FC<{
                   </div>
 
                   {/* Date-wise Ledger Section */}
-                  <div className="mt-24">
-                    <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 border-b border-gray-100 pb-4">Daily Transaction Ledger</h4>
+                  <div className="mt-24 print:mt-12">
+                    <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 border-b border-gray-100 pb-4 print:mb-4">Daily Transaction Ledger</h4>
                     <div className={`space-y-4 no-print ${isGeneratingPdf ? 'hidden' : ''}`}>
                       {chartData.length > 0 ? chartData.map((day, idx) => (
                         <div key={idx} className="bg-gray-50 rounded-[2rem] overflow-hidden border border-gray-100">
@@ -798,44 +961,44 @@ const AdminOffice: React.FC<{
                     </div>
 
                     {/* Static Detailed Table for Export/Print */}
-                    <div className="mt-12 overflow-hidden border border-gray-200 rounded-[2rem]">
-                      <table className="w-full text-left border-collapse">
+                    <div className="mt-12 overflow-hidden border border-gray-200 rounded-[2rem] print:border-gray-300 print:rounded-none">
+                      <table className="w-full text-left border-collapse print:text-[8px]">
                         <thead>
-                          <tr className="bg-gray-100 text-gray-900 border-b border-gray-200">
-                            <th className="p-6 text-[10px] font-black uppercase tracking-widest">Date</th>
-                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Credit (Rev)</th>
-                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Debit (COGS+Tax)</th>
-                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right">Inv Expenses</th>
+                          <tr className="bg-gray-100 text-gray-900 border-b border-gray-200 print:bg-gray-50 print:border-gray-300">
+                            <th className="p-6 text-[10px] font-black uppercase tracking-widest print:p-2">Date</th>
+                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right print:p-2">Credit (Rev)</th>
+                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right print:p-2">Debit (COGS+Tax)</th>
+                            <th className="p-6 text-[10px] font-black uppercase tracking-widest text-right print:p-2">Inv Expenses</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-gray-100 print:divide-gray-300">
                           {chartData.map((day, idx) => {
                             const dailyInvExpenses = day.invoices.reduce((sum: number, inv: any) => sum + (inv.expenseAmount || 0), 0);
                             const dailyCogsTax = day.debit - dailyInvExpenses;
                             return (
-                              <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                                <td className="p-6">
-                                  <p className="text-xs font-black text-gray-900">{day.date}</p>
-                                  <p className="text-[9px] font-bold text-gray-400 uppercase">{new Date(day.date).toLocaleDateString('en-PK', { weekday: 'short' })}</p>
+                              <tr key={idx} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} print:bg-white`}>
+                                <td className="p-6 print:p-2">
+                                  <p className="text-xs font-black text-gray-900 print:text-[8px]">{day.date}</p>
+                                  <p className="text-[9px] font-bold text-gray-400 uppercase print:text-[6px]">{new Date(day.date).toLocaleDateString('en-PK', { weekday: 'short' })}</p>
                                 </td>
-                                <td className="p-6 text-right font-black text-green-600 text-sm">Rs. {(day.revenue || 0).toLocaleString()}</td>
-                                <td className="p-6 text-right font-black text-red-600 text-sm">Rs. {dailyCogsTax.toLocaleString()}</td>
-                                <td className="p-6 text-right font-black text-red-400 text-sm">Rs. {dailyInvExpenses.toLocaleString()}</td>
+                                <td className="p-6 text-right font-black text-green-600 text-sm print:p-2 print:text-[8px]">Rs. {(day.revenue || 0).toLocaleString()}</td>
+                                <td className="p-6 text-right font-black text-red-600 text-sm print:p-2 print:text-[8px]">Rs. {dailyCogsTax.toLocaleString()}</td>
+                                <td className="p-6 text-right font-black text-red-400 text-sm print:p-2 print:text-[8px]">Rs. {dailyInvExpenses.toLocaleString()}</td>
                               </tr>
                             );
                           })}
                           {chartData.length === 0 && (
                             <tr>
-                              <td colSpan={3} className="p-20 text-center text-xs font-black text-gray-400 uppercase tracking-widest">No data available</td>
+                              <td colSpan={4} className="p-20 text-center text-xs font-black text-gray-400 uppercase tracking-widest print:p-10">No data available</td>
                             </tr>
                           )}
                         </tbody>
-                        <tfoot className="bg-gray-50 border-t-2 border-gray-900">
+                        <tfoot className="bg-gray-50 border-t-2 border-gray-900 print:bg-white print:border-gray-800">
                           <tr>
-                            <td className="p-6 font-black text-gray-900 uppercase text-[10px] tracking-widest">Monthly Totals</td>
-                            <td className="p-6 text-right font-black text-green-700 text-lg">Rs. {(stats.totalRevenue || 0).toLocaleString()}</td>
-                            <td className="p-6 text-right font-black text-red-700 text-lg">Rs. {(stats.totalCost + stats.totalTax || 0).toLocaleString()}</td>
-                            <td className="p-6 text-right font-black text-red-500 text-lg">Rs. {(stats.totalInvoiceExpenses || 0).toLocaleString()}</td>
+                            <td className="p-6 font-black text-gray-900 uppercase text-[10px] tracking-widest print:p-2 print:text-[8px]">Monthly Totals</td>
+                            <td className="p-6 text-right font-black text-green-700 text-lg print:p-2 print:text-[10px]">Rs. {(stats.totalRevenue || 0).toLocaleString()}</td>
+                            <td className="p-6 text-right font-black text-red-700 text-lg print:p-2 print:text-[10px]">Rs. {(stats.totalCost + stats.totalTax || 0).toLocaleString()}</td>
+                            <td className="p-6 text-right font-black text-red-500 text-lg print:p-2 print:text-[10px]">Rs. {(stats.totalInvoiceExpenses || 0).toLocaleString()}</td>
                           </tr>
                         </tfoot>
                       </table>

@@ -144,7 +144,11 @@ export const db = {
         const { data, error } = await withRetry(() => supabase.from('profiles').select('*').eq('id', id).maybeSingle());
         if (error) return null;
         return data;
-      } catch (e) { return null; }
+      } catch (e: any) { 
+        const errorMsg = String(e?.message || e || '').toLowerCase();
+        if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
+        return null; 
+      }
     }
     return null;
   },
@@ -160,7 +164,11 @@ export const db = {
       const { data: createdProfile, error: upsertError } = await withRetry(() => supabase.from('profiles').upsert(newProfile).select().single());
       if (upsertError) throw upsertError;
       return createdProfile;
-    } catch (e) { return null; }
+    } catch (e: any) { 
+      const errorMsg = String(e?.message || e || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
+      return null; 
+    }
   },
 
   getAllProfiles: async (): Promise<Profile[]> => {
@@ -172,6 +180,8 @@ export const db = {
       }
     } catch (e: any) {
       console.error("Fetch Profiles Error:", e);
+      const errorMsg = String(e?.message || e || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
     }
     return [];
   },
@@ -185,17 +195,28 @@ export const db = {
         
         const allProducts = (data || []).map(p => {
           // If it's an admin product but email is missing, fill it in for the UI
-          const isSystemProduct = !p.user_id || p.user_email === ADMIN_EMAIL || !p.user_email;
+          // An admin product is one where user_id is null OR user_email matches ADMIN_EMAIL OR user_email is null
+          const isSystemProduct = !p.user_id || 
+                                  (p.user_email && p.user_email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
+                                  !p.user_email;
+          
           const createdByName = p.user_email || (isSystemProduct ? ADMIN_EMAIL : '');
           
           return {
-            id: p.id, name: p.name, sku: p.sku || '', category: p.category || 'General',
-            price: Number(p.tp) || Number(p.price) || 0, cost: Number(p.cost) || 0,
+            id: p.id, 
+            name: p.name, 
+            sku: p.sku || '', 
+            category: p.category || 'General',
+            price: Number(p.tp) || Number(p.price) || 0, 
+            cost: Number(p.cost) || 0,
             purchasePrice: Number(p.cost) || 0,
-            mrp: Number(p.mrp) || 0, tp: Number(p.tp) || 0, stock: Number(p.stock) || 0,
-            minStock: Number(p.min_stock) || 0, description: p.description || '',
+            mrp: Number(p.mrp) || 0, 
+            tp: Number(p.tp) || 0, 
+            stock: Number(p.stock) || 0,
+            minStock: Number(p.min_stock) || 0, 
+            description: p.description || '',
             size: p.size || '',
-            createdBy: p.user_id,
+            createdBy: p.user_id || 'admin',
             createdByName: createdByName,
             createdAt: p.created_at
           };
@@ -205,7 +226,7 @@ export const db = {
           // Filter for staff users: Own products OR Admin's products OR Shared products
           return allProducts.filter(p => 
             p.createdBy === userId || 
-            p.createdByName === ADMIN_EMAIL ||
+            (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
             !p.createdBy ||
             p.createdByName === '' // Also show products with no owner info as they might be admin's legacy products
           );
@@ -213,8 +234,10 @@ export const db = {
         
         return allProducts;
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching products:", err);
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
     }
     const data = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     const products = data ? JSON.parse(data) : [];
@@ -225,8 +248,8 @@ export const db = {
       return products.filter((p: any) => 
         p.createdBy === userId || 
         !p.createdBy || 
-        p.createdByName === ADMIN_EMAIL ||
-        p.user_email === ADMIN_EMAIL
+        (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
+        (p.user_email && p.user_email.toLowerCase() === ADMIN_EMAIL.toLowerCase())
       );
     }
     return products;
@@ -312,7 +335,10 @@ export const db = {
           createdAt: c.created_at
         }));
       }
-    } catch (err) {}
+    } catch (err: any) {
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
+    }
     const data = localStorage.getItem(STORAGE_KEYS.CLIENTS);
     const clients = data ? JSON.parse(data) : [];
     if (userId) return clients.filter((c: any) => c.createdBy === userId);
@@ -391,7 +417,10 @@ export const db = {
           createdAt: inv.created_at
         }));
       }
-    } catch (err) {}
+    } catch (err: any) {
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
+    }
     const data = localStorage.getItem(STORAGE_KEYS.INVOICES);
     const invoices = (data ? JSON.parse(data) : []).map((inv: any) => ({
       ...inv,
@@ -488,7 +517,10 @@ export const db = {
           createdAt: ri.created_at
         }));
       }
-    } catch (err) {}
+    } catch (err: any) {
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
+    }
     const data = localStorage.getItem(STORAGE_KEYS.RECURRING);
     const recurring = data ? JSON.parse(data) : [];
     if (userId) return recurring.filter((ri: any) => ri.createdBy === userId);
@@ -566,8 +598,12 @@ export const db = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('recurring_invoices').delete().eq('id', id);
-      } catch (e) {}
+        const { error } = await withRetry(() => supabase.from('recurring_invoices').delete().eq('id', id));
+        if (error) throw error;
+      } catch (e: any) {
+        const errorMsg = String(e?.message || e || '').toLowerCase();
+        if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
+      }
     }
   },
 
@@ -582,8 +618,12 @@ export const db = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('invoices').delete().eq('id', id);
-      } catch (e) {}
+        const { error } = await withRetry(() => supabase.from('invoices').delete().eq('id', id));
+        if (error) throw error;
+      } catch (e: any) {
+        const errorMsg = String(e?.message || e || '').toLowerCase();
+        if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
+      }
     }
   },
 
@@ -598,8 +638,12 @@ export const db = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('products').delete().eq('id', id);
-      } catch (e) {}
+        const { error } = await withRetry(() => supabase.from('products').delete().eq('id', id));
+        if (error) throw error;
+      } catch (e: any) {
+        const errorMsg = String(e?.message || e || '').toLowerCase();
+        if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
+      }
     }
   },
 
@@ -614,8 +658,12 @@ export const db = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('stock_transactions').delete().eq('id', id);
-      } catch (e) {}
+        const { error } = await withRetry(() => supabase.from('stock_transactions').delete().eq('id', id));
+        if (error) throw error;
+      } catch (e: any) {
+        const errorMsg = String(e?.message || e || '').toLowerCase();
+        if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
+      }
     }
   },
 
@@ -638,9 +686,13 @@ export const db = {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('clients').delete().eq('id', id);
-        await supabase.from('recurring_invoices').delete().eq('client_id', id);
-      } catch (e) {}
+        await withRetry(() => supabase.from('recurring_invoices').delete().eq('client_id', id));
+        const { error } = await withRetry(() => supabase.from('clients').delete().eq('id', id));
+        if (error) throw error;
+      } catch (e: any) {
+        const errorMsg = String(e?.message || e || '').toLowerCase();
+        if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw e;
+      }
     }
   },
 
@@ -664,8 +716,10 @@ export const db = {
           createdAt: t.created_at
         }));
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching transactions:", err);
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
     }
     const data = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
     const transactions = data ? JSON.parse(data) : [];
@@ -753,7 +807,10 @@ export const db = {
           createdByName: p.user_email
         }));
       }
-    } catch (err) {}
+    } catch (err: any) {
+      const errorMsg = String(err?.message || err || '').toLowerCase();
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
+    }
     const data = localStorage.getItem(STORAGE_KEYS.PAYMENTS);
     const payments = data ? JSON.parse(data) : [];
     let filtered = payments;

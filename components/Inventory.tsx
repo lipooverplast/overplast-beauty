@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, Search, Edit, Trash2, Package, Sparkles, X, 
   Loader2, AlertCircle, CheckCircle2, RefreshCw, Shield, ArrowUpCircle,
-  ArrowUpRight, ArrowDownLeft, Activity, History, Calendar, Download, Printer, FileText, Filter, Clock, AlertTriangle
+  ArrowUpRight, ArrowDownLeft, Activity, History, Calendar, Download, Printer, FileText, Filter, Clock, AlertTriangle, ChevronDown
 } from 'lucide-react';
 import { Product, UserRole, StockTransaction } from '../types';
 import { db } from '../db';
@@ -46,7 +46,49 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   
   // History State
   const [historyMonth, setHistoryMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
+  const [currentYear, currentMonth] = historyMonth.split('-').map(Number);
+
+  const handleMonthChange = (m: number) => {
+    const monthStr = m.toString().padStart(2, '0');
+    setHistoryMonth(`${currentYear}-${monthStr}`);
+  };
+
+  const handleYearChange = (y: number) => {
+    const monthStr = currentMonth.toString().padStart(2, '0');
+    setHistoryMonth(`${y}-${monthStr}`);
+  };
+
+  const handlePrevMonth = () => {
+    let m = currentMonth - 1;
+    let y = currentYear;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+    setHistoryMonth(`${y}-${m.toString().padStart(2, '0')}`);
+  };
+
+  const handleNextMonth = () => {
+    let m = currentMonth + 1;
+    let y = currentYear;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    setHistoryMonth(`${y}-${m.toString().padStart(2, '0')}`);
+  };
+
   const [allTransactions, setAllTransactions] = useState<StockTransaction[]>([]);
+  const activeMonths = useMemo(() => {
+    const monthsSet = new Set<string>();
+    allTransactions.forEach(tx => monthsSet.add(tx.date.slice(0, 7)));
+    return Array.from(monthsSet).sort((a, b) => b.localeCompare(a));
+  }, [allTransactions]);
   const [monthlyFlow, setMonthlyFlow] = useState({ in: 0, out: 0 });
 
   const safeProducts = useMemo(() => Array.isArray(products) ? products : [], [products]);
@@ -92,8 +134,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     }
 
     // Staff Logic:
-    // Only show products registered by this staff member
-    const staffProducts = safeProducts.filter(p => p.createdBy === userId);
+    // Show products registered by this staff member AND products created by Admin
+    const staffProducts = safeProducts.filter(p => 
+      p.createdBy === userId || 
+      (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
+      !p.createdBy ||
+      p.createdBy === 'admin' ||
+      p.createdBy === 'Admin' ||
+      p.user_email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+    );
     
     return staffProducts.filter(p => {
       const matchesSearch = (p.name || '').toLowerCase().includes(nameSearch) || (p.sku || '').toLowerCase().includes(nameSearch);
@@ -103,7 +152,22 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   }, [safeProducts, searchTerm, selectedCategory, role, userId]);
 
   const adminProducts = useMemo(() => {
-    return safeProducts.filter(p => p.createdByName === ADMIN_EMAIL || !p.createdBy);
+    // Filter to show ONLY products created by Admin
+    // This allows staff to see the "master catalog" of products registered by the admin
+    const filtered = safeProducts.filter(p => 
+      (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
+      p.createdBy === 'admin' ||
+      p.createdBy === 'Admin' ||
+      (p as any).user_email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+    );
+    
+    if (filtered.length === 0 && safeProducts.length > 0) {
+      console.warn("Inventory: No admin products found after filtering. Total products:", safeProducts.length);
+      // Fallback: if no admin products found, show all products to avoid empty dropdown
+      return safeProducts;
+    }
+    
+    return filtered;
   }, [safeProducts]);
 
   const filteredTransactions = useMemo(() => {
@@ -360,6 +424,71 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     }
   };
 
+  const handlePrint = () => {
+    const printArea = document.getElementById('stock-report-area');
+    if (!printArea) {
+      window.print();
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Please allow popups to print.");
+      return;
+    }
+
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map(style => style.outerHTML)
+      .join('\n');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Inventory Report - ${new Date().toLocaleDateString()}</title>
+          ${styles}
+          <style>
+            body { 
+              background: white !important; 
+              padding: 20px !important; 
+              margin: 0 !important;
+              color: black !important;
+            }
+            .no-print { display: none !important; }
+            * { 
+              color: black !important; 
+              border-color: #e5e7eb !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .bg-black, .bg-gray-900, .bg-gray-800 { 
+              background: white !important; 
+              border: 1px solid #e5e7eb !important; 
+            }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 9px; }
+            .rounded-[3rem], .rounded-[2.5rem] { border-radius: 0 !important; }
+            .shadow-2xl, .shadow-lg, .shadow-xl { box-shadow: none !important; }
+          </style>
+        </head>
+        <body>
+          <div class="print-container">
+            ${printArea.innerHTML}
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(() => {
+                window.focus();
+                window.print();
+                window.close();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const downloadStockReport = async () => {
     setIsGeneratingReport(true);
     const element = document.getElementById('stock-report-area');
@@ -384,7 +513,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 w-full pb-20">
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-white p-8 rounded-[3rem] border border-gray-200 shadow-sm">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-white p-8 rounded-[3rem] border border-gray-200 shadow-sm no-print">
         <div className="flex items-center gap-6">
            <div className={`p-4 rounded-2xl ${viewMode === 'inventory' ? 'bg-black text-yellow-500' : 'bg-indigo-600 text-white'} shadow-lg transition-all`}>
               {viewMode === 'inventory' ? <Package size={32} /> : <History size={32} />}
@@ -434,6 +563,9 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   {isClearing ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />} Clear Ledger
                 </button>
               )}
+              <button onClick={handlePrint} className="flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-900 px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-sm hover:bg-gray-50">
+                <Printer size={18} /> Print
+              </button>
               <button onClick={downloadStockReport} disabled={isGeneratingReport} className="flex items-center justify-center gap-3 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl disabled:opacity-50">
                 {isGeneratingReport ? <Loader2 className="animate-spin text-yellow-500" size={18} /> : <Download size={18} />} Stock Report
               </button>
@@ -443,7 +575,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       </div>
 
       {viewMode === 'inventory' ? (
-        <div className="bg-white rounded-[2.5rem] border border-gray-200 shadow-sm overflow-hidden animate-in fade-in duration-300">
+        <div className="bg-white rounded-[2.5rem] border border-gray-200 shadow-sm overflow-hidden animate-in fade-in duration-300 no-print">
           <div className="p-6 md:p-8 border-b border-gray-200 flex flex-col xl:flex-row gap-6 bg-gray-50/30">
             <div className="relative flex-1">
               <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
@@ -496,12 +628,16 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 {filteredProducts.length > 0 ? filteredProducts.map((product) => {
                   const status = getStockStatus(product.stock || 0, product.minStock || 0);
                   const isDeleting = deletingId === product.id;
-                  const isAdminProduct = product.createdByName === ADMIN_EMAIL || !product.createdBy;
+                  const isAdminProduct = (product.createdByName && product.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
+                                         !product.createdBy || 
+                                         product.createdBy === 'admin' || 
+                                         product.createdBy === 'Admin' ||
+                                         product.user_email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
                   const isOwner = product.createdBy === userId;
                   // Staff can edit/delete their own products. Admin can do anything.
-                  const canModify = role === 'Admin' || isOwner;
+                  const canModify = role?.toLowerCase() === 'admin' || isOwner;
                   // All staff and admins can manage stock (restock/return) for any product
-                  const canManageStock = role === 'Admin' || role === 'Staff';
+                  const canManageStock = role?.toLowerCase() === 'admin' || role?.toLowerCase() === 'staff';
 
                   return (
                     <tr key={product.id} className="hover:bg-yellow-50/10 transition-colors group">
@@ -629,19 +765,71 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
           </div>
         </div>
       ) : (
-        <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="space-y-6 animate-in fade-in duration-300 print:p-0 print:bg-white print:space-y-0">
            {/* Ledger Header and Analysis remains same as before... */}
-           <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm grid grid-cols-1 xl:grid-cols-12 gap-6 items-center">
-              <div className="xl:col-span-3 flex items-center gap-6">
+           <div className="bg-white p-8 rounded-[2.5rem] border border-gray-200 shadow-sm grid grid-cols-1 xl:grid-cols-12 gap-6 items-center no-print">
+              <div 
+                className="xl:col-span-3 flex items-center gap-6 cursor-pointer hover:bg-gray-50 p-2 rounded-2xl transition-all"
+              >
                 <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><Calendar size={24} /></div>
                 <div>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Analysis Period</p>
-                  <input 
-                    type="month" 
-                    value={historyMonth} 
-                    onChange={(e) => setHistoryMonth(e.target.value)}
-                    className="font-black text-gray-900 border-none bg-transparent focus:ring-0 text-xl outline-none cursor-pointer"
-                  />
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={handlePrevMonth}
+                        className="p-1.5 bg-gray-50 text-gray-400 rounded-lg hover:text-black hover:bg-gray-100 transition-all"
+                      >
+                        <ChevronDown className="rotate-90" size={14} />
+                      </button>
+                      
+                      <select 
+                        value={currentMonth}
+                        onChange={(e) => handleMonthChange(Number(e.target.value))}
+                        className="bg-transparent text-gray-900 font-black text-lg border-none focus:ring-0 cursor-pointer appearance-none pr-2"
+                      >
+                        {months.map((m, i) => (
+                          <option key={m} value={i + 1} className="bg-white text-gray-900">{m}</option>
+                        ))}
+                      </select>
+
+                      <select 
+                        value={currentYear}
+                        onChange={(e) => handleYearChange(Number(e.target.value))}
+                        className="bg-transparent text-gray-900 font-black text-lg border-none focus:ring-0 cursor-pointer appearance-none"
+                      >
+                        {years.map(y => (
+                          <option key={y} value={y} className="bg-white text-gray-900">{y}</option>
+                        ))}
+                      </select>
+
+                      <button 
+                        onClick={handleNextMonth}
+                        className="p-1.5 bg-gray-50 text-gray-400 rounded-lg hover:text-black hover:bg-gray-100 transition-all"
+                      >
+                        <ChevronDown className="-rotate-90" size={14} />
+                      </button>
+                    </div>
+                    
+                    {/* Active Months Quick Select */}
+                    {activeMonths.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {activeMonths.slice(0, 5).map(m => (
+                          <button
+                            key={m}
+                            onClick={() => setHistoryMonth(m)}
+                            className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase transition-all ${
+                              historyMonth === m 
+                                ? 'bg-indigo-600 text-white shadow-md' 
+                                : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600'
+                            }`}
+                          >
+                            {new Date(m + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -673,41 +861,41 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
               </div>
            </div>
 
-           <div id="stock-report-area" className="bg-white rounded-[3rem] border border-gray-200 shadow-xl overflow-hidden">
-              <div className="p-12 border-b border-gray-100 flex justify-between items-start">
+           <div id="stock-report-area" className="bg-white rounded-[3rem] border border-gray-200 shadow-xl overflow-hidden print:border-none print:shadow-none print:p-4">
+              <div className="p-12 border-b border-gray-100 flex justify-between items-start print:p-4 print:mb-8">
                  <div>
-                    <h1 className="text-3xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST BEAUTY</h1>
-                    <p className="text-lg text-gray-500 font-beauty italic mt-1">Movement Ledger & Stock Balance</p>
-                    <div className="mt-6 flex items-center gap-2 text-[10px] font-black text-yellow-600 uppercase tracking-widest">
+                    <h1 className="text-3xl font-black tracking-tighter text-gray-900 leading-none uppercase print:text-xl">OVERPLAST BEAUTY</h1>
+                    <p className="text-lg text-gray-500 font-beauty italic mt-1 print:text-sm">Movement Ledger & Stock Balance</p>
+                    <div className="mt-6 flex items-center gap-2 text-[10px] font-black text-yellow-600 uppercase tracking-widest print:mt-2">
                        <Calendar size={12} /> Cycle: {historyMonth}
                     </div>
                  </div>
                  <div className="text-right">
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">System Timestamp</p>
-                    <p className="text-sm font-bold text-gray-900">{new Date().toLocaleDateString()}</p>
+                    <p className="text-sm font-bold text-gray-900 print:text-xs">{new Date().toLocaleDateString()}</p>
                  </div>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-gray-50 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 border-b">
+                <table className="w-full text-left border-collapse print:text-[8px]">
+                  <thead className="bg-gray-50 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 border-b print:bg-white print:border-gray-300">
                     <tr>
-                      <th className="px-8 py-6">Date</th>
-                      <th className="px-8 py-6">Item Identity</th>
-                      <th className="px-6 py-6 text-center">Size</th>
-                      <th className="px-8 py-6 text-center">Movement Type</th>
-                      <th className="px-8 py-6 text-right">Qty Flow</th>
-                      <th className="px-8 py-6">Ledger Note</th>
-                      <th className="px-8 py-6 text-right">Actions</th>
+                      <th className="px-8 py-6 print:px-2 print:py-2">Date</th>
+                      <th className="px-8 py-6 print:px-2 print:py-2">Item Identity</th>
+                      <th className="px-6 py-6 text-center print:px-2 print:py-2">Size</th>
+                      <th className="px-8 py-6 text-center print:px-2 print:py-2">Movement Type</th>
+                      <th className="px-8 py-6 text-right print:px-2 print:py-2">Qty Flow</th>
+                      <th className="px-8 py-6 print:px-2 print:py-2">Ledger Note</th>
+                      <th className="px-8 py-6 text-right no-print">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-gray-100 print:divide-gray-300">
                     {filteredTransactions.length > 0 ? filteredTransactions.map((tx, idx) => (
-                      <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="px-8 py-5 text-sm font-bold text-gray-600 whitespace-nowrap">{tx.date}</td>
-                        <td className="px-8 py-5">
+                      <tr key={idx} className="hover:bg-gray-50/50 transition-colors print:bg-white">
+                        <td className="px-8 py-5 text-sm font-bold text-gray-600 whitespace-nowrap print:px-2 print:py-2 print:text-[8px]">{tx.date}</td>
+                        <td className="px-8 py-5 print:px-2 print:py-2">
                           <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center no-print ${
                               tx.type === 'IN' ? 'bg-green-50 text-green-600' : 
                               tx.type === 'RETURN' ? 'bg-amber-50 text-amber-600' : 
                               'bg-blue-50 text-blue-600'
@@ -716,11 +904,11 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                                tx.type === 'RETURN' ? <RefreshCw size={14} /> : 
                                <ArrowDownLeft size={14} />}
                             </div>
-                            <span className="text-sm font-black text-gray-900">{tx.productName}</span>
+                            <span className="text-sm font-black text-gray-900 print:text-[8px]">{tx.productName}</span>
                           </div>
                         </td>
-                        <td className="px-6 py-5 text-center">
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                        <td className="px-6 py-5 text-center print:px-2 print:py-2">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border print:text-[6px] ${
                             tx.productSize 
                             ? 'bg-purple-50 border-purple-100 text-purple-600' 
                             : 'bg-gray-50 border-gray-100 text-gray-400'
@@ -728,8 +916,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                             {tx.productSize || 'N/A'}
                           </span>
                         </td>
-                        <td className="px-8 py-5 text-center">
-                          <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                        <td className="px-8 py-5 text-center print:px-2 print:py-2">
+                          <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border print:text-[6px] ${
                             tx.type === 'IN' ? 'bg-green-50 text-green-700 border-green-200' : 
                             tx.type === 'RETURN' ? 'bg-amber-50 text-amber-700 border-amber-200' : 
                             'bg-blue-50 text-blue-700 border-blue-200'
@@ -737,15 +925,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                             STOCK {tx.type}
                           </span>
                         </td>
-                        <td className={`px-8 py-5 text-right font-black ${
+                        <td className={`px-8 py-5 text-right font-black print:px-2 print:py-2 print:text-[8px] ${
                           tx.type === 'IN' ? 'text-green-600' : 
                           tx.type === 'RETURN' ? 'text-amber-600' : 
                           'text-blue-600'
                         }`}>
                           {tx.type === 'IN' ? '+' : '-'}{tx.quantity}
                         </td>
-                        <td className="px-8 py-5 text-[11px] font-bold text-gray-400 italic">{tx.note || 'Manual Adjustment'}</td>
-                        <td className="px-8 py-5 text-right">
+                        <td className="px-8 py-5 text-[11px] font-bold text-gray-400 italic print:px-2 print:py-2 print:text-[8px]">{tx.note || 'Manual Adjustment'}</td>
+                        <td className="px-8 py-5 text-right no-print">
                           <button 
                             onClick={() => triggerTxDeleteConfirm(tx)}
                             disabled={deletingTxId === tx.id}
@@ -758,7 +946,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       </tr>
                     )) : (
                       <tr>
-                        <td colSpan={5} className="px-8 py-20 text-center opacity-30">
+                        <td colSpan={7} className="px-8 py-20 text-center opacity-30 print:p-10">
                           <FileText size={48} className="mx-auto mb-4" />
                           <p className="text-sm font-black uppercase tracking-widest">No matching movement data</p>
                         </td>
@@ -766,18 +954,18 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                     )}
                   </tbody>
                   {filteredTransactions.length > 0 && (
-                    <tfoot className="bg-gray-50 border-t-2 border-gray-100">
+                    <tfoot className="bg-gray-50 border-t-2 border-gray-100 print:bg-white print:border-gray-300">
                       <tr>
-                         <td colSpan={4} className="px-8 py-10 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Aggregate Flow Analysis</td>
-                         <td className="px-8 py-10 text-right">
+                         <td colSpan={4} className="px-8 py-10 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest print:px-2 print:py-4 print:text-[8px]">Aggregate Flow Analysis</td>
+                         <td className="px-8 py-10 text-right print:px-2 print:py-4">
                             <div className="space-y-1">
-                               <p className="text-xs font-black text-green-600 uppercase tracking-widest">INBOUND: +{monthlyFlow.in}</p>
-                               <p className="text-xs font-black text-blue-600 uppercase tracking-widest">OUTBOUND: -{monthlyFlow.out}</p>
-                               <div className="h-[1px] bg-gray-200 my-2"></div>
-                               <p className="text-sm font-black text-gray-900 uppercase tracking-widest">NET FLOW: {monthlyFlow.in - monthlyFlow.out}</p>
+                               <p className="text-xs font-black text-green-600 uppercase tracking-widest print:text-[8px]">INBOUND: +{monthlyFlow.in}</p>
+                               <p className="text-xs font-black text-blue-600 uppercase tracking-widest print:text-[8px]">OUTBOUND: -{monthlyFlow.out}</p>
+                               <div className="h-[1px] bg-gray-200 my-2 print:bg-gray-300"></div>
+                               <p className="text-sm font-black text-gray-900 uppercase tracking-widest print:text-[10px]">NET FLOW: {monthlyFlow.in - monthlyFlow.out}</p>
                             </div>
                          </td>
-                         <td></td>
+                         <td colSpan={2} className="no-print"></td>
                       </tr>
                     </tfoot>
                   )}
@@ -904,7 +1092,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
             </div>
             <form key={editingProduct?.id || selectedAdminProductId} onSubmit={handleSubmit} className="p-10 space-y-8 max-h-[75vh] overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {!editingProduct && role === 'Staff' && (
+                {!editingProduct && (
                   <div className="md:col-span-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Select Product from Admin Catalog</label>
                     <select 
@@ -915,10 +1103,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       <option value="">-- Create New Custom Product --</option>
                       {adminProducts.map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.name} (Rs. {p.tp.toFixed(2)})
+                          {p.name} {p.size ? `(${p.size})` : ''} - Rs. {p.tp} (MRP: {p.mrp})
                         </option>
                       ))}
                     </select>
+                    {adminProducts.length === 0 && (
+                      <p className="mt-2 text-[10px] text-red-500 font-bold italic">
+                        Admin catalog is currently empty (Total System Assets: {safeProducts.length}). Please add products as Admin first.
+                      </p>
+                    )}
                     <p className="mt-2 text-[10px] text-gray-400 font-bold italic">Selecting an admin product will pre-fill the details below.</p>
                   </div>
                 )}

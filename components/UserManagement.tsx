@@ -165,14 +165,16 @@ const UserManagement: React.FC<{ onUpdate: () => void, onBackToDashboard?: () =>
             onClick={async () => {
               try {
                 const res = await fetch('/api/admin/health');
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                 const data = await res.json();
                 if (data.status === 'ok' && data.config.serviceKeySet) {
                   alert("✅ Admin API is working and configured!");
                 } else {
-                  alert("❌ Admin API configuration issue. Check Secrets.");
+                  alert(`❌ Admin API issue: ${data.error || 'Configuration incomplete'}. Check Secrets.`);
                 }
-              } catch (err) {
-                alert("❌ Could not reach Admin API.");
+              } catch (err: any) {
+                console.error("Admin API Health Check Failed:", err);
+                alert(`❌ Could not reach Admin API: ${err.message || "Network Error"}. Ensure server is running.`);
               }
             }}
             className="px-6 py-4 bg-gray-100 text-gray-600 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center gap-2 whitespace-nowrap"

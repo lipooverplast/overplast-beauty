@@ -3,7 +3,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   FileText, Download, Printer, Search, Calendar, 
   ArrowUpRight, ArrowDownRight, Package, User, 
-  RefreshCcw, ChevronDown, ChevronUp, Filter
+  RefreshCcw, ChevronDown, ChevronUp, Filter, AlertCircle
 } from 'lucide-react';
 import { Product, Invoice, StockTransaction, UserRole } from '../types';
 import { APP_LOGO_URL, APP_NAME } from '../constants';
@@ -16,24 +16,73 @@ interface SalesReportProps {
   invoices: Invoice[];
   transactions: StockTransaction[];
   role: UserRole;
+  userId: string;
 }
 
-const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transactions, role }) => {
+const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transactions, role, userId }) => {
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [searchSrn, setSearchSrn] = useState('');
+
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  
+  const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
+
+  const [currentYear, currentMonth] = selectedMonth.split('-').map(Number);
+
+  const handleMonthChange = (m: number) => {
+    const monthStr = m.toString().padStart(2, '0');
+    setSelectedMonth(`${currentYear}-${monthStr}`);
+  };
+
+  const handleYearChange = (y: number) => {
+    const monthStr = currentMonth.toString().padStart(2, '0');
+    setSelectedMonth(`${y}-${monthStr}`);
+  };
+
+  const handlePrevMonth = () => {
+    let m = currentMonth - 1;
+    let y = currentYear;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+    setSelectedMonth(`${y}-${m.toString().padStart(2, '0')}`);
+  };
+
+  const handleNextMonth = () => {
+    let m = currentMonth + 1;
+    let y = currentYear;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    setSelectedMonth(`${y}-${m.toString().padStart(2, '0')}`);
+  };
   const [searchProduct, setSearchProduct] = useState('');
   const [searchCategory, setSearchCategory] = useState('All');
   const [searchSize, setSearchSize] = useState('All');
   const [searchMrp, setSearchMrp] = useState('');
   const [searchTp, setSearchTp] = useState('');
-  const [searchOpeningStock, setSearchOpeningStock] = useState('');
-  const [searchUnitSales, setSearchUnitSales] = useState('');
-  const [searchValueWiseSales, setSearchValueWiseSales] = useState('');
-  const [searchClosingStock, setSearchClosingStock] = useState('');
-  const [searchRemainingStockUnit, setSearchRemainingStockUnit] = useState('');
-  const [searchRemainingStockValue, setSearchRemainingStockValue] = useState('');
-  const [searchCashSales, setSearchCashSales] = useState('');
-  const [searchCreditSales, setSearchCreditSales] = useState('');
   const [searchSalesPerson, setSearchSalesPerson] = useState('');
+  const [searchOpeningStockUnit, setSearchOpeningStockUnit] = useState('');
+  const [searchOpeningStockValue, setSearchOpeningStockValue] = useState('');
+  const [searchReceivedUnit, setSearchReceivedUnit] = useState('');
+  const [searchReceivedValue, setSearchReceivedValue] = useState('');
+  const [searchTotalStockUnit, setSearchTotalStockUnit] = useState('');
+  const [searchReturnUnit, setSearchReturnUnit] = useState('');
+  const [searchReturnValue, setSearchReturnValue] = useState('');
+  const [searchDiscount, setSearchDiscount] = useState('');
+  const [searchCashSalesUnit, setSearchCashSalesUnit] = useState('');
+  const [searchCashSalesValue, setSearchCashSalesValue] = useState('');
+  const [searchCreditSalesUnit, setSearchCreditSalesUnit] = useState('');
+  const [searchCreditSalesValue, setSearchCreditSalesValue] = useState('');
+  const [searchTotalSalesUnit, setSearchTotalSalesUnit] = useState('');
+  const [searchTotalSalesValue, setSearchTotalSalesValue] = useState('');
+  const [searchClosingStockUnit, setSearchClosingStockUnit] = useState('');
+  const [searchClosingStockValue, setSearchClosingStockValue] = useState('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   const topScrollRef = useRef<HTMLDivElement>(null);
@@ -54,103 +103,252 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
   const sizes = useMemo(() => ['All', ...new Set(products.map(p => p.size).filter(Boolean))], [products]);
   const categories = useMemo(() => ['All', ...new Set(products.map(p => p.category).filter(Boolean))], [products]);
 
+  const activeMonths = useMemo(() => {
+    const monthsSet = new Set<string>();
+    invoices.forEach(inv => monthsSet.add(inv.date.slice(0, 7)));
+    transactions.forEach(tx => monthsSet.add(tx.date.slice(0, 7)));
+    return Array.from(monthsSet).sort((a, b) => b.localeCompare(a));
+  }, [invoices, transactions]);
+
   const reportData = useMemo(() => {
     const monthStr = selectedMonth;
-    const startOfMonth = new Date(monthStr + '-01');
+    const isStaff = role?.toLowerCase() === 'staff';
     
-    const monthlyInvoices = invoices.filter(inv => inv.date.startsWith(monthStr) && inv.status !== 'Returned');
-    const monthlyTransactions = transactions.filter(t => t.date.startsWith(monthStr));
+    const filteredInvoices = isStaff 
+      ? invoices.filter(inv => inv.createdBy === userId)
+      : invoices;
+      
+    const filteredTransactions = isStaff
+      ? transactions.filter(t => t.createdBy === userId)
+      : transactions;
 
-    return products.map(product => {
+    const monthlyInvoices = filteredInvoices.filter(inv => inv.date.startsWith(monthStr) && inv.status !== 'Returned');
+    const monthlyTransactions = filteredTransactions.filter(t => t.date.startsWith(monthStr));
+
+    return products.map((product, index) => {
+      const productInvoices = monthlyInvoices.filter(inv => inv.items.some(i => i.productId === product.id));
+      
+      // Get TP from invoice if available, else use product default
+      let displayTp = product.tp;
+      if (productInvoices.length > 0) {
+        const firstItem = productInvoices[0].items.find(i => i.productId === product.id);
+        if (firstItem) displayTp = firstItem.tp;
+      }
+
       // Calculate Opening Stock
-      // We work backwards from current stock
-      const transactionsAfterStart = transactions.filter(t => t.productId === product.id && t.date >= monthStr + '-01');
+      let openingStockUnit = 0;
       
-      const inAfterStart = transactionsAfterStart.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
-      const outAfterStart = transactionsAfterStart.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
-      const returnAfterStart = transactionsAfterStart.filter(t => t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
-      
-      const openingStock = product.stock - inAfterStart + outAfterStart + returnAfterStart;
+      if (isStaff) {
+        // For staff, opening stock is the sum of THEIR transactions before the month start
+        const transactionsBeforeMonth = filteredTransactions.filter(t => 
+          t.productId === product.id && 
+          t.date < monthStr + '-01'
+        );
+        
+        const inBefore = transactionsBeforeMonth.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
+        const outBefore = transactionsBeforeMonth.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
+        const returnBefore = transactionsBeforeMonth.filter(t => t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
+        
+        openingStockUnit = inBefore - outBefore - returnBefore;
+      } else {
+        // For admin, opening stock is global: current stock minus all transactions after month start
+        const transactionsAfterStart = transactions.filter(t => t.productId === product.id && t.date >= monthStr + '-01');
+        const inAfterStart = transactionsAfterStart.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
+        const outAfterStart = transactionsAfterStart.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
+        const returnAfterStart = transactionsAfterStart.filter(t => t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
+        
+        openingStockUnit = product.stock - inAfterStart + outAfterStart + returnAfterStart;
+      }
+
+      const openingStockValue = openingStockUnit * displayTp;
 
       // Monthly activity
-      const inDuringMonth = monthlyTransactions.filter(t => t.productId === product.id && t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
-      const outDuringMonth = monthlyTransactions.filter(t => t.productId === product.id && t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
-      const returnDuringMonth = monthlyTransactions.filter(t => t.productId === product.id && t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
+      const receivedUnit = monthlyTransactions.filter(t => t.productId === product.id && t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
+      const receivedValue = receivedUnit * displayTp;
 
-      const unitSales = outDuringMonth;
-      const cashSales = monthlyInvoices
-        .filter(inv => inv.paymentMethod === 'Cash')
-        .reduce((sum, inv) => {
-          const item = inv.items.find(i => i.productId === product.id);
-          return sum + (item ? item.quantity : 0);
-        }, 0);
-      const creditSales = monthlyInvoices
-        .filter(inv => inv.paymentMethod === 'Credit')
-        .reduce((sum, inv) => {
-          const item = inv.items.find(i => i.productId === product.id);
-          return sum + (item ? item.quantity : 0);
-        }, 0);
-      const valueWiseSales = unitSales * product.tp;
-      const closingStock = openingStock + inDuringMonth - outDuringMonth - returnDuringMonth;
+      const totalStockUnit = openingStockUnit + receivedUnit;
 
-      const productInvoices = monthlyInvoices.filter(inv => inv.items.some(i => i.productId === product.id));
+      const returnUnit = monthlyTransactions.filter(t => t.productId === product.id && t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
+      const returnValue = returnUnit * displayTp;
+
+      let discount = 0;
+      let cashSalesUnit = 0;
+      let cashSalesValue = 0;
+      let creditSalesUnit = 0;
+      let creditSalesValue = 0;
       const salesMap = new Map<string, number>();
+
       productInvoices.forEach(inv => {
         const item = inv.items.find(i => i.productId === product.id);
         if (!item) return;
         
+        // Calculate item-level discount amount
+        const itemGross = item.tp * item.quantity;
+        const itemDiscountAmount = itemGross - item.total;
+        discount += itemDiscountAmount;
+        
+        if (inv.paymentMethod === 'Cash') {
+          cashSalesUnit += item.quantity;
+          cashSalesValue += item.total;
+        } else {
+          creditSalesUnit += item.quantity;
+          creditSalesValue += item.total;
+        }
+
         const creator = inv.createdByName || 'Admin';
         const displayName = inv.salesPerson ? `${inv.salesPerson} (${creator})` : creator;
         salesMap.set(displayName, (salesMap.get(displayName) || 0) + item.quantity);
       });
+
+      const totalSalesUnit = cashSalesUnit + creditSalesUnit;
+      const totalSalesValue = cashSalesValue + creditSalesValue;
+
+      const closingStockUnit = totalStockUnit - totalSalesUnit - returnUnit;
+      const closingStockValue = closingStockUnit * displayTp;
 
       const salesPersons = Array.from(salesMap.entries())
         .map(([name, qty]) => `${name} (${qty})`)
         .join(', ') || '-';
 
       return {
+        srn: index + 1,
         id: product.id,
         name: product.name,
         size: product.size || '-',
         category: product.category,
         mrp: product.mrp,
-        tp: product.tp,
-        openingStock,
-        unitSales,
-        cashSales,
-        creditSales,
-        valueWiseSales,
-        closingStock,
-        returns: returnDuringMonth,
-        remainingStockUnit: product.stock,
-        remainingStockValue: product.stock * product.tp,
-        salesPersons: salesPersons || '-'
+        tp: displayTp,
+        salesPersons,
+        openingStockUnit,
+        openingStockValue,
+        receivedUnit,
+        receivedValue,
+        totalStockUnit,
+        returnUnit,
+        returnValue,
+        discount,
+        cashSalesUnit,
+        cashSalesValue,
+        creditSalesUnit,
+        creditSalesValue,
+        totalSalesUnit,
+        totalSalesValue,
+        closingStockUnit,
+        closingStockValue,
+        hasActivity: receivedUnit !== 0 || totalSalesUnit !== 0 || returnUnit !== 0
       };
     }).filter(item => {
+      // Only show products with activity in the selected month
+      if (!item.hasActivity) return false;
+
+      const matchesSrn = String(item.srn).includes(searchSrn);
       const matchesProduct = item.name.toLowerCase().includes(searchProduct.toLowerCase());
       const matchesCategory = searchCategory === 'All' || item.category === searchCategory;
       const matchesSize = searchSize === 'All' || item.size === searchSize;
       const matchesMrp = String(item.mrp).includes(searchMrp);
       const matchesTp = String(item.tp).includes(searchTp);
-      const matchesOpeningStock = String(item.openingStock).includes(searchOpeningStock);
-      const matchesUnitSales = String(item.unitSales).includes(searchUnitSales);
-      const matchesValueWiseSales = String(item.valueWiseSales).includes(searchValueWiseSales);
-      const matchesClosingStock = String(item.closingStock).includes(searchClosingStock);
-      const matchesRemainingStockUnit = String(item.remainingStockUnit).includes(searchRemainingStockUnit);
-      const matchesRemainingStockValue = String(item.remainingStockValue).includes(searchRemainingStockValue);
-      const matchesCashSales = String(item.cashSales).includes(searchCashSales);
-      const matchesCreditSales = String(item.creditSales).includes(searchCreditSales);
       const matchesSalesPerson = item.salesPersons.toLowerCase().includes(searchSalesPerson.toLowerCase());
+      const matchesOpeningStockUnit = String(item.openingStockUnit).includes(searchOpeningStockUnit);
+      const matchesOpeningStockValue = String(item.openingStockValue).includes(searchOpeningStockValue);
+      const matchesReceivedUnit = String(item.receivedUnit).includes(searchReceivedUnit);
+      const matchesReceivedValue = String(item.receivedValue).includes(searchReceivedValue);
+      const matchesTotalStockUnit = String(item.totalStockUnit).includes(searchTotalStockUnit);
+      const matchesReturnUnit = String(item.returnUnit).includes(searchReturnUnit);
+      const matchesReturnValue = String(item.returnValue).includes(searchReturnValue);
+      const matchesDiscount = String(item.discount).includes(searchDiscount);
+      const matchesCashSalesUnit = String(item.cashSalesUnit).includes(searchCashSalesUnit);
+      const matchesCashSalesValue = String(item.cashSalesValue).includes(searchCashSalesValue);
+      const matchesCreditSalesUnit = String(item.creditSalesUnit).includes(searchCreditSalesUnit);
+      const matchesCreditSalesValue = String(item.creditSalesValue).includes(searchCreditSalesValue);
+      const matchesTotalSalesUnit = String(item.totalSalesUnit).includes(searchTotalSalesUnit);
+      const matchesTotalSalesValue = String(item.totalSalesValue).includes(searchTotalSalesValue);
+      const matchesClosingStockUnit = String(item.closingStockUnit).includes(searchClosingStockUnit);
+      const matchesClosingStockValue = String(item.closingStockValue).includes(searchClosingStockValue);
       
-      return matchesProduct && matchesCategory && matchesSize && matchesMrp && matchesTp && 
-             matchesOpeningStock && matchesUnitSales && matchesValueWiseSales && 
-             matchesClosingStock && matchesRemainingStockUnit && matchesRemainingStockValue && 
-             matchesCashSales && matchesCreditSales &&
-             matchesSalesPerson;
+      return matchesSrn && matchesProduct && matchesCategory && matchesSize && matchesMrp && matchesTp && 
+             matchesSalesPerson && matchesOpeningStockUnit && matchesOpeningStockValue && 
+             matchesReceivedUnit && matchesReceivedValue && matchesTotalStockUnit && 
+             matchesReturnUnit && matchesReturnValue && matchesDiscount && 
+             matchesCashSalesUnit && matchesCashSalesValue && 
+             matchesCreditSalesUnit && matchesCreditSalesValue && 
+             matchesTotalSalesUnit && matchesTotalSalesValue && 
+             matchesClosingStockUnit && matchesClosingStockValue;
     });
-  }, [products, invoices, transactions, selectedMonth, searchProduct, searchCategory, searchSize, searchMrp, searchTp, 
-      searchOpeningStock, searchUnitSales, searchValueWiseSales, searchClosingStock, 
-      searchRemainingStockUnit, searchRemainingStockValue, searchCashSales, searchCreditSales, searchSalesPerson]);
+  }, [products, invoices, transactions, selectedMonth, searchSrn, searchProduct, searchCategory, searchSize, searchMrp, searchTp, 
+      searchSalesPerson, searchOpeningStockUnit, searchOpeningStockValue, searchReceivedUnit, searchReceivedValue, 
+      searchTotalStockUnit, searchReturnUnit, searchReturnValue, searchDiscount, 
+      searchCashSalesUnit, searchCashSalesValue, searchCreditSalesUnit, searchCreditSalesValue, 
+      searchTotalSalesUnit, searchTotalSalesValue, searchClosingStockUnit, searchClosingStockValue]);
+
+  const handlePrint = () => {
+    const printArea = document.getElementById('sales-report-content');
+    if (!printArea) {
+      window.print();
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Please allow popups to print.");
+      return;
+    }
+
+    const content = printArea.innerHTML;
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map(style => style.outerHTML)
+      .join('\n');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Sales Report - ${monthName}</title>
+          ${styles}
+          <style>
+            body { 
+              background: white !important; 
+              padding: 20px !important; 
+              margin: 0 !important;
+              color: black !important;
+            }
+            .no-print { display: none !important; }
+            /* Force black text for printing */
+            * { 
+              color: black !important; 
+              border-color: #e5e7eb !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .bg-black, .bg-gray-900, .bg-gray-800 { 
+              background: white !important; 
+              border: 1px solid #e5e7eb !important; 
+            }
+            .text-white, .text-gray-400, .text-gray-500 {
+              color: black !important;
+            }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 9px; }
+            .rounded-[3rem], .rounded-[2.5rem] { border-radius: 0 !important; }
+            .shadow-2xl, .shadow-lg { box-shadow: none !important; }
+          </style>
+        </head>
+        <body>
+          <div class="print-container">
+            ${content}
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(() => {
+                window.focus();
+                window.print();
+                window.close();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
   const exportToPdf = async () => {
     setIsGeneratingPdf(true);
@@ -177,20 +375,29 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
 
   const exportToExcel = () => {
     const data = reportData.map(item => ({
+      'SRN': item.srn,
       'PRODUCT': item.name,
-      'CATEGORY': item.category,
       'SIZE': item.size,
       'MRP': item.mrp,
       'TP': item.tp,
-      'OPENING STOCK': item.openingStock,
-      'UNIT SALES': item.unitSales,
-      'CASH SALES': item.cashSales,
-      'CREDIT SALES': item.creditSales,
-      'VALUE WISE SALES': item.valueWiseSales,
-      'CLOSING STOCK': item.closingStock,
-      'REMAINING STOCK UNIT': item.remainingStockUnit,
-      'REMAINING STOCK VALUE': item.remainingStockValue,
-      'SALES PERSON NAME': item.salesPersons
+      'CATEGORY': item.category,
+      'SALES PERSON NAME': item.salesPersons,
+      'OPENING STOCK (UNIT)': item.openingStockUnit,
+      'OPENING STOCK (VALUE)': item.openingStockValue,
+      'RECEIVED (UNIT)': item.receivedUnit,
+      'RECEIVED (VALUE)': item.receivedValue,
+      'TOTAL STOCK (UNIT)': item.totalStockUnit,
+      'RETURN (UNIT)': item.returnUnit,
+      'RETURN (VALUE)': item.returnValue,
+      'DISCOUNT': item.discount,
+      'CASH SALES (UNIT)': item.cashSalesUnit,
+      'CASH SALES (VALUE)': item.cashSalesValue,
+      'CREDIT SALES (UNIT)': item.creditSalesUnit,
+      'CREDIT SALES (VALUE)': item.creditSalesValue,
+      'TOTAL SALES (UNIT)': item.totalSalesUnit,
+      'TOTAL SALES (VALUE)': item.totalSalesValue,
+      'CLOSING STOCK (UNIT)': item.closingStockUnit,
+      'CLOSING STOCK (VALUE)': item.closingStockValue
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -202,27 +409,78 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
   const monthName = new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }).toUpperCase();
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 bg-black p-8 rounded-[3rem]">
+    <div id="sales-report-content" className="space-y-6 animate-in fade-in duration-500 bg-black p-8 rounded-[3rem] print:p-0 print:bg-white print:space-y-0">
       {/* Header Controls */}
-      <div className="bg-gray-900 p-6 rounded-[2.5rem] border border-gray-800 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-4 w-full md:w-auto">
-          <div className="p-3 bg-yellow-900/20 text-yellow-500 rounded-xl">
-            <Calendar size={20} />
+      <div className="bg-gray-900 p-6 rounded-[2.5rem] border border-gray-800 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-4 no-print">
+        <div className="flex flex-col gap-4 w-full md:w-auto">
+          <div className="flex items-center gap-4 p-2 rounded-2xl transition-all">
+            <div className="p-3 bg-yellow-900/20 text-yellow-500 rounded-xl">
+              <Calendar size={20} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Report Month</span>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={handlePrevMonth}
+                  className="p-1.5 bg-gray-800 text-gray-400 rounded-lg hover:text-white hover:bg-gray-700 transition-all"
+                >
+                  <ChevronDown className="rotate-90" size={14} />
+                </button>
+                
+                <select 
+                  value={currentMonth}
+                  onChange={(e) => handleMonthChange(Number(e.target.value))}
+                  className="bg-transparent text-white font-black text-sm border-none focus:ring-0 cursor-pointer appearance-none pr-2"
+                >
+                  {months.map((m, i) => (
+                    <option key={m} value={i + 1} className="bg-gray-900 text-white">{m}</option>
+                  ))}
+                </select>
+
+                <select 
+                  value={currentYear}
+                  onChange={(e) => handleYearChange(Number(e.target.value))}
+                  className="bg-transparent text-white font-black text-sm border-none focus:ring-0 cursor-pointer appearance-none"
+                >
+                  {years.map(y => (
+                    <option key={y} value={y} className="bg-gray-900 text-white">{y}</option>
+                  ))}
+                </select>
+
+                <button 
+                  onClick={handleNextMonth}
+                  className="p-1.5 bg-gray-800 text-gray-400 rounded-lg hover:text-white hover:bg-gray-700 transition-all"
+                >
+                  <ChevronDown className="-rotate-90" size={14} />
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Report Month</span>
-            <input 
-              type="month" 
-              value={selectedMonth} 
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="font-black text-white border-none bg-transparent focus:ring-0 text-xl outline-none cursor-pointer"
-            />
-          </div>
+          
+          {/* Active Months Quick Select */}
+          {activeMonths.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-2">
+              <span className="text-[8px] font-black text-gray-600 uppercase tracking-widest w-full mb-1">Active Months:</span>
+              {activeMonths.slice(0, 6).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setSelectedMonth(m)}
+                  className={`px-3 py-1 rounded-full text-[9px] font-black uppercase transition-all ${
+                    selectedMonth === m 
+                      ? 'bg-yellow-500 text-black shadow-lg shadow-yellow-500/20' 
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+                  }`}
+                >
+                  {new Date(m + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 w-full md:w-auto">
           <button 
-            onClick={() => window.print()}
+            onClick={handlePrint}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-gray-800 border border-gray-700 rounded-xl font-black text-[10px] uppercase text-white hover:bg-gray-700 transition-all"
           >
             <Printer size={16} /> Print
@@ -243,15 +501,33 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
         </div>
       </div>
 
-      {/* Report Table */}
-      <div className="bg-black rounded-[2.5rem] border border-gray-800 shadow-2xl overflow-hidden" id="sales-report-table">
-        <div className="bg-black p-8 flex items-center justify-between border-b border-gray-800">
-          <h2 className="text-3xl font-black text-white uppercase tracking-tighter">
+      {/* Report Content */}
+      {reportData.length > 0 ? (
+        <div className="space-y-6">
+          {/* Report Table */}
+          <div className="bg-black rounded-[2.5rem] border border-gray-800 shadow-2xl overflow-hidden print:border-none print:shadow-none print:bg-white print:rounded-none" id="sales-report-table">
+        {/* Print Only Header */}
+        <div className="hidden print:block p-8 border-b-2 border-black mb-8">
+          <div className="flex justify-between items-end">
+            <div>
+              <h1 className="text-3xl font-black uppercase tracking-tighter text-black mb-2">Sales & Stock Report</h1>
+              <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">
+                Reporting Period: {new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xl font-black uppercase text-black">{APP_NAME}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Generated on {new Date().toLocaleDateString()}</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-black p-8 flex items-center justify-between border-b border-gray-800 print:bg-white print:border-gray-200 print:p-4">
+          <h2 className="text-3xl font-black text-white uppercase tracking-tighter print:text-black print:text-xl">
             SALES & STOCKS {monthName}
           </h2>
           <div className="flex items-center gap-4">
-            <img src={APP_LOGO_URL} alt="Logo" className="h-12 w-12 object-contain invert" />
-            <div className="text-white text-right">
+            <img src={APP_LOGO_URL} alt="Logo" className="h-12 w-12 object-contain invert print:invert-0" />
+            <div className="text-white text-right print:text-black">
               <p className="text-xs font-black uppercase leading-none tracking-tighter">OVERPLAST</p>
               <p className="text-[10px] font-bold opacity-60 leading-none uppercase">Beauty Management</p>
             </div>
@@ -264,39 +540,63 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
           onScroll={handleTopScroll}
           className="overflow-x-auto scrollbar-thin scrollbar-thumb-yellow-600 scrollbar-track-gray-900 mx-4 mt-4 print:hidden"
         >
-          <div style={{ width: '1600px', height: '1px' }}></div>
+          <div style={{ width: '2400px', height: '1px' }}></div>
         </div>
 
         <div 
           ref={tableScrollRef}
           onScroll={handleTableScroll}
-          className="overflow-x-auto scrollbar-thin scrollbar-thumb-yellow-600 scrollbar-track-gray-900"
+          className="overflow-x-auto scrollbar-thin scrollbar-thumb-yellow-600 scrollbar-track-gray-900 print:overflow-visible"
         >
-          <table className="w-full min-w-[1600px] text-left border-collapse">
+          <table className="w-full min-w-[2400px] text-left border-collapse print:min-w-0 print:w-full print:text-[8px]">
             <thead>
-              <tr className="bg-gray-900 border-b border-gray-800">
-                <th rowSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 min-w-[200px]">PRODUCT</th>
-                <th rowSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center">CATEGORY</th>
-                <th rowSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center">SIZE</th>
-                <th rowSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-right">MRP</th>
-                <th rowSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-right">TP</th>
-                <th rowSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center">SALES PERSON</th>
-                <th className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center">OPENING STOCK</th>
-                <th colSpan={4} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center">SALES</th>
-                <th className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center">CLOSING STOCK</th>
-                <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest text-center">REMAINING STOCK</th>
+              <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">SRN</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 min-w-[200px] print:text-black print:p-1 print:border-gray-300">PRODUCTS</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">SIZE</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-right print:text-black print:p-1 print:border-gray-300">MRP</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-right print:text-black print:p-1 print:border-gray-300">TP</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">CATEGORY</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">SALES PERSON NAME</th>
+                <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">OPENING STOCKS</th>
+                <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">RECEIVED IN CURRENT MONTH</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">TOTAL STOCKS</th>
+                <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">RETURN</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-right print:text-black print:p-1 print:border-gray-300">DISCOUNT</th>
+                <th colSpan={4} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">SALES</th>
+                <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">TOTAL SALES</th>
+                <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest text-center print:text-black print:p-1">CLOSING STOCKS</th>
               </tr>
-              <tr className="bg-gray-900 border-b border-gray-800">
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center">UNIT</th>
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center">TOTAL</th>
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center">CASH</th>
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center">CREDIT</th>
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center">VALUE</th>
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center">UNIT</th>
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center">UNIT</th>
-                <th className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest text-center">VALUE</th>
+              <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+                <th colSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">CASH</th>
+                <th colSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">CREDIT</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest text-center print:text-black print:p-1">VALUE</th>
+              </tr>
+              <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
+                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center">VALUE</th>
+                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center">UNIT</th>
+                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center">VALUE</th>
               </tr>
               <tr className="bg-black border-b border-gray-800 print:hidden">
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchSrn}
+                    onChange={(e) => setSearchSrn(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
+                  />
+                </th>
                 <th className="p-2 border-r border-gray-800">
                   <input 
                     type="text" 
@@ -305,15 +605,6 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                     onChange={(e) => setSearchProduct(e.target.value)}
                     className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500"
                   />
-                </th>
-                <th className="p-2 border-r border-gray-800">
-                  <select 
-                    value={searchCategory}
-                    onChange={(e) => setSearchCategory(e.target.value)}
-                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 appearance-none"
-                  >
-                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
                 </th>
                 <th className="p-2 border-r border-gray-800">
                   <select 
@@ -343,6 +634,15 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   />
                 </th>
                 <th className="p-2 border-r border-gray-800">
+                  <select 
+                    value={searchCategory}
+                    onChange={(e) => setSearchCategory(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 appearance-none"
+                  >
+                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </th>
+                <th className="p-2 border-r border-gray-800">
                   <input 
                     type="text" 
                     placeholder="Filter Sales Person..."
@@ -355,8 +655,8 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   <input 
                     type="text" 
                     placeholder="Filter..."
-                    value={searchOpeningStock}
-                    onChange={(e) => setSearchOpeningStock(e.target.value)}
+                    value={searchOpeningStockUnit}
+                    onChange={(e) => setSearchOpeningStockUnit(e.target.value)}
                     className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
                   />
                 </th>
@@ -364,35 +664,8 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   <input 
                     type="text" 
                     placeholder="Filter..."
-                    value={searchUnitSales}
-                    onChange={(e) => setSearchUnitSales(e.target.value)}
-                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
-                  />
-                </th>
-                <th className="p-2 border-r border-gray-800">
-                  <input 
-                    type="text" 
-                    placeholder="Filter..."
-                    value={searchCashSales}
-                    onChange={(e) => setSearchCashSales(e.target.value)}
-                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
-                  />
-                </th>
-                <th className="p-2 border-r border-gray-800">
-                  <input 
-                    type="text" 
-                    placeholder="Filter..."
-                    value={searchCreditSales}
-                    onChange={(e) => setSearchCreditSales(e.target.value)}
-                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
-                  />
-                </th>
-                <th className="p-2 border-r border-gray-800">
-                  <input 
-                    type="text" 
-                    placeholder="Filter..."
-                    value={searchValueWiseSales}
-                    onChange={(e) => setSearchValueWiseSales(e.target.value)}
+                    value={searchOpeningStockValue}
+                    onChange={(e) => setSearchOpeningStockValue(e.target.value)}
                     className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
                   />
                 </th>
@@ -400,8 +673,8 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   <input 
                     type="text" 
                     placeholder="Filter..."
-                    value={searchClosingStock}
-                    onChange={(e) => setSearchClosingStock(e.target.value)}
+                    value={searchReceivedUnit}
+                    onChange={(e) => setSearchReceivedUnit(e.target.value)}
                     className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
                   />
                 </th>
@@ -409,8 +682,107 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   <input 
                     type="text" 
                     placeholder="Filter..."
-                    value={searchRemainingStockUnit}
-                    onChange={(e) => setSearchRemainingStockUnit(e.target.value)}
+                    value={searchReceivedValue}
+                    onChange={(e) => setSearchReceivedValue(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchTotalStockUnit}
+                    onChange={(e) => setSearchTotalStockUnit(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchReturnUnit}
+                    onChange={(e) => setSearchReturnUnit(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchReturnValue}
+                    onChange={(e) => setSearchReturnValue(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchDiscount}
+                    onChange={(e) => setSearchDiscount(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchCashSalesUnit}
+                    onChange={(e) => setSearchCashSalesUnit(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchCashSalesValue}
+                    onChange={(e) => setSearchCashSalesValue(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchCreditSalesUnit}
+                    onChange={(e) => setSearchCreditSalesUnit(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchCreditSalesValue}
+                    onChange={(e) => setSearchCreditSalesValue(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchTotalSalesUnit}
+                    onChange={(e) => setSearchTotalSalesUnit(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchTotalSalesValue}
+                    onChange={(e) => setSearchTotalSalesValue(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchClosingStockUnit}
+                    onChange={(e) => setSearchClosingStockUnit(e.target.value)}
                     className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
                   />
                 </th>
@@ -418,8 +790,8 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   <input 
                     type="text" 
                     placeholder="Filter..."
-                    value={searchRemainingStockValue}
-                    onChange={(e) => setSearchRemainingStockValue(e.target.value)}
+                    value={searchClosingStockValue}
+                    onChange={(e) => setSearchClosingStockValue(e.target.value)}
                     className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-right"
                   />
                 </th>
@@ -428,11 +800,9 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
             <tbody className="divide-y divide-gray-800">
               {reportData.map((item, idx) => (
                 <tr key={item.id} className={`${idx % 2 === 0 ? 'bg-black' : 'bg-gray-900/30'} hover:bg-gray-900 transition-colors`}>
+                  <td className="p-4 text-xs font-black text-gray-500 text-center border-r border-gray-800">{item.srn}</td>
                   <td className="p-4 text-xs font-black text-white border-r border-gray-800">
                     {item.name}
-                  </td>
-                  <td className="p-4 text-[10px] font-bold text-gray-500 text-center border-r border-gray-800 uppercase tracking-tighter">
-                    {item.category}
                   </td>
                   <td className="p-4 text-xs font-bold text-gray-400 text-center border-r border-gray-800">
                     <span className="px-3 py-1 bg-gray-800 text-yellow-500 rounded-full text-[10px] font-black uppercase tracking-widest">
@@ -441,67 +811,123 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   </td>
                   <td className="p-4 text-xs font-black text-white text-right border-r border-gray-800">{item.mrp.toLocaleString()}</td>
                   <td className="p-4 text-xs font-black text-yellow-500 text-right border-r border-gray-800">{item.tp.toLocaleString()}</td>
+                  <td className="p-4 text-[10px] font-bold text-gray-500 text-center border-r border-gray-800 uppercase tracking-tighter">
+                    {item.category}
+                  </td>
                   <td className="p-4 text-center border-r border-gray-800">
                     <span className="text-[10px] font-black text-white uppercase tracking-tighter">{item.salesPersons}</span>
                   </td>
-                  <td className="p-4 text-xs font-black text-blue-400 text-center border-r border-gray-800">{item.openingStock}</td>
-                  <td className="p-4 text-center border-r border-gray-800">
-                    <div className="flex flex-col items-center">
-                      <span className="text-xs font-black text-emerald-500">{item.unitSales}</span>
-                    </div>
-                  </td>
-                  <td className="p-4 text-center border-r border-gray-800">
-                    <span className="text-xs font-black text-emerald-400">{item.cashSales}</span>
-                  </td>
-                  <td className="p-4 text-center border-r border-gray-800">
-                    <span className="text-xs font-black text-orange-400">{item.creditSales}</span>
-                  </td>
-                  <td className="p-4 text-xs font-black text-emerald-600 text-right border-r border-gray-800">{item.valueWiseSales.toLocaleString()}</td>
-                  <td className="p-4 text-xs font-black text-white text-center border-r border-gray-800">{item.closingStock}</td>
-                  <td className="p-4 text-xs font-black text-white text-center border-r border-gray-800">{item.remainingStockUnit}</td>
-                  <td className="p-4 text-xs font-black text-yellow-500 text-right">{item.remainingStockValue.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-blue-400 text-center border-r border-gray-800">{item.openingStockUnit}</td>
+                  <td className="p-4 text-xs font-black text-blue-300 text-right border-r border-gray-800">{item.openingStockValue.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-purple-400 text-center border-r border-gray-800">{item.receivedUnit}</td>
+                  <td className="p-4 text-xs font-black text-purple-300 text-right border-r border-gray-800">{item.receivedValue.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-white text-center border-r border-gray-800">{item.totalStockUnit}</td>
+                  <td className="p-4 text-xs font-black text-red-400 text-center border-r border-gray-800">{item.returnUnit}</td>
+                  <td className="p-4 text-xs font-black text-red-300 text-right border-r border-gray-800">{item.returnValue.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-yellow-600 text-right border-r border-gray-800">{item.discount.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-emerald-400 text-center border-r border-gray-800">{item.cashSalesUnit}</td>
+                  <td className="p-4 text-xs font-black text-emerald-300 text-right border-r border-gray-800">{item.cashSalesValue.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-orange-400 text-center border-r border-gray-800">{item.creditSalesUnit}</td>
+                  <td className="p-4 text-xs font-black text-orange-300 text-right border-r border-gray-800">{item.creditSalesValue.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-emerald-500 text-center border-r border-gray-800">{item.totalSalesUnit}</td>
+                  <td className="p-4 text-xs font-black text-emerald-600 text-right border-r border-gray-800">{item.totalSalesValue.toLocaleString()}</td>
+                  <td className="p-4 text-xs font-black text-white text-center border-r border-gray-800">{item.closingStockUnit}</td>
+                  <td className="p-4 text-xs font-black text-yellow-500 text-right">{item.closingStockValue.toLocaleString()}</td>
                 </tr>
               ))}
               {reportData.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="p-20 text-center text-xs font-black text-gray-600 uppercase tracking-widest">
-                    No matching products found for this period
+                  <td colSpan={23} className="p-24 text-center text-xs font-black text-gray-600 uppercase tracking-widest bg-gray-900/50">
+                    <div className="flex flex-col items-center gap-6">
+                      <div className="p-6 bg-gray-800 rounded-full text-gray-600">
+                        <AlertCircle size={64} />
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xl text-white">No Activity Found</p>
+                        <p className="text-gray-500">No sales or stock transactions recorded for {new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+                      </div>
+                      <p className="text-[10px] opacity-50 font-bold max-w-sm mx-auto">This report displays products that have opening stock, received units, or sales in the selected month. Try selecting a different month or check your filters.</p>
+                    </div>
                   </td>
                 </tr>
               )}
             </tbody>
             <tfoot className="bg-gray-900 text-white border-t-2 border-yellow-500">
               <tr>
-                <td colSpan={6} className="p-6 text-[10px] font-black uppercase tracking-widest border-r border-gray-800">Monthly Totals</td>
+                <td colSpan={7} className="p-6 text-[10px] font-black uppercase tracking-widest border-r border-gray-800">Monthly Totals</td>
                 <td className="p-6 text-center border-r border-gray-800 font-black text-blue-400">
-                  {reportData.reduce((sum, i) => sum + i.openingStock, 0)}
+                  {reportData.reduce((sum, i) => sum + i.openingStockUnit, 0)}
                 </td>
-                <td className="p-6 text-center border-r border-gray-800 font-black text-emerald-500">
-                  {reportData.reduce((sum, i) => sum + i.unitSales, 0)}
+                <td className="p-6 text-right border-r border-gray-800 font-black text-blue-300">
+                  {reportData.reduce((sum, i) => sum + i.openingStockValue, 0).toLocaleString()}
+                </td>
+                <td className="p-6 text-center border-r border-gray-800 font-black text-purple-400">
+                  {reportData.reduce((sum, i) => sum + i.receivedUnit, 0)}
+                </td>
+                <td className="p-6 text-right border-r border-gray-800 font-black text-purple-300">
+                  {reportData.reduce((sum, i) => sum + i.receivedValue, 0).toLocaleString()}
+                </td>
+                <td className="p-6 text-center border-r border-gray-800 font-black text-white">
+                  {reportData.reduce((sum, i) => sum + i.totalStockUnit, 0)}
+                </td>
+                <td className="p-6 text-center border-r border-gray-800 font-black text-red-400">
+                  {reportData.reduce((sum, i) => sum + i.returnUnit, 0)}
+                </td>
+                <td className="p-6 text-right border-r border-gray-800 font-black text-red-300">
+                  {reportData.reduce((sum, i) => sum + i.returnValue, 0).toLocaleString()}
+                </td>
+                <td className="p-6 text-right border-r border-gray-800 font-black text-yellow-600">
+                  {reportData.reduce((sum, i) => sum + i.discount, 0).toLocaleString()}
                 </td>
                 <td className="p-6 text-center border-r border-gray-800 font-black text-emerald-400">
-                  {reportData.reduce((sum, i) => sum + i.cashSales, 0)}
+                  {reportData.reduce((sum, i) => sum + i.cashSalesUnit, 0)}
+                </td>
+                <td className="p-6 text-right border-r border-gray-800 font-black text-emerald-300">
+                  {reportData.reduce((sum, i) => sum + i.cashSalesValue, 0).toLocaleString()}
                 </td>
                 <td className="p-6 text-center border-r border-gray-800 font-black text-orange-400">
-                  {reportData.reduce((sum, i) => sum + i.creditSales, 0)}
+                  {reportData.reduce((sum, i) => sum + i.creditSalesUnit, 0)}
+                </td>
+                <td className="p-6 text-right border-r border-gray-800 font-black text-orange-300">
+                  {reportData.reduce((sum, i) => sum + i.creditSalesValue, 0).toLocaleString()}
+                </td>
+                <td className="p-6 text-center border-r border-gray-800 font-black text-emerald-500">
+                  {reportData.reduce((sum, i) => sum + i.totalSalesUnit, 0)}
                 </td>
                 <td className="p-6 text-right border-r border-gray-800 font-black text-emerald-600">
-                  {reportData.reduce((sum, i) => sum + i.valueWiseSales, 0).toLocaleString()}
+                  {reportData.reduce((sum, i) => sum + i.totalSalesValue, 0).toLocaleString()}
                 </td>
                 <td className="p-6 text-center border-r border-gray-800 font-black text-white">
-                  {reportData.reduce((sum, i) => sum + i.closingStock, 0)}
-                </td>
-                <td className="p-6 text-center border-r border-gray-800 font-black text-white">
-                  {reportData.reduce((sum, i) => sum + i.remainingStockUnit, 0)}
+                  {reportData.reduce((sum, i) => sum + i.closingStockUnit, 0)}
                 </td>
                 <td className="p-6 text-right font-black text-yellow-500">
-                  {reportData.reduce((sum, i) => sum + i.remainingStockValue, 0).toLocaleString()}
+                  {reportData.reduce((sum, i) => sum + i.closingStockValue, 0).toLocaleString()}
                 </td>
               </tr>
             </tfoot>
           </table>
         </div>
       </div>
+        </div>
+      ) : (
+        <div className="bg-gray-900/50 p-24 rounded-[3rem] border border-gray-800 border-dashed text-center flex flex-col items-center gap-6">
+          <div className="p-8 bg-gray-800 rounded-full text-gray-600">
+            <AlertCircle size={80} />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-3xl font-black text-white uppercase tracking-tighter">No Work Recorded</h3>
+            <p className="text-gray-500 font-bold">
+              No activity found for {new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+          <div className="max-w-md mx-auto p-6 bg-gray-900 rounded-2xl border border-gray-800">
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest leading-relaxed">
+              This report only displays months and products with active transactions (Sales, Received Stock, or Returns). 
+              Please select an active month from the list above or check your filters.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

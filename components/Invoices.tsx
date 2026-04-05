@@ -4,7 +4,7 @@ import {
   Plus, Search, FileText, CheckCircle, Clock, X, Eye, 
   Trash2, Loader2, Printer, Download, AlertCircle, 
   Sparkles, Upload, ArrowRight, Wallet, Banknote, 
-  CreditCard, ChevronDown, Percent, Info, Shield, MapPin, Phone, AlertTriangle, RotateCcw
+  CreditCard, ChevronDown, Percent, Info, Shield, MapPin, Phone, AlertTriangle, RotateCcw, Pencil
 } from 'lucide-react';
 import { Invoice, Product, Client, InvoiceItem, UserRole, Payment, StockTransaction } from '../types';
 import { db } from '../db';
@@ -55,6 +55,8 @@ interface InvoicesProps {
 const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpdate, role, userId, userEmail, initialClientId, onClearInitialClient }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [isParsingInvoice, setIsParsingInvoice] = useState(false);
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [selectedItems, setSelectedItems] = useState<InvoiceItem[]>([]);
@@ -83,9 +85,9 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
   const filteredProducts = React.useMemo(() => {
-    if (role === 'Admin') return products;
-    return products.filter(p => p.createdBy === userId);
-  }, [products, role, userId]);
+    // For debugging: show ALL products in the invoice selection to ensure visibility
+    return products;
+  }, [products]);
 
   useEffect(() => {
     if (initialClientId) {
@@ -217,18 +219,37 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     }
   };
 
+  const handleEditInvoice = (invoice: Invoice) => {
+    setIsEditing(true);
+    setEditingInvoiceId(invoice.id);
+    setSelectedClientId(invoice.clientId);
+    setSelectedItems(invoice.items);
+    setTaxRate(invoice.taxRate);
+    setDiscountRate(invoice.discountRate || 0);
+    setSalesPerson(invoice.salesPerson || '');
+    setExpenseType(invoice.expenseType || '');
+    setExpenseAmount(invoice.expenseAmount || 0);
+    setPaymentMethod(invoice.paymentMethod as 'Cash' | 'Credit' || 'Cash');
+    setIsModalOpen(true);
+    setViewingInvoice(null);
+  };
+
   const handleCreateInvoice = async () => {
     const client = clients.find(c => c.id === selectedClientId);
     if (!client) { alert("Please select a client."); return; }
     if (selectedItems.length === 0) { alert("Please add at least one item."); return; }
 
     setIsCreating(true);
+    
+    const invoiceId = isEditing && editingInvoiceId ? editingInvoiceId : db.generateUUID();
+    const originalInvoice = isEditing ? invoices.find(inv => inv.id === editingInvoiceId) : null;
+
     const newInvoice: Invoice = {
-      id: db.generateUUID(),
-      invoiceNumber: `OVI-${Math.floor(Math.random() * 90000) + 10000}`,
+      id: invoiceId,
+      invoiceNumber: isEditing && originalInvoice ? originalInvoice.invoiceNumber : `OVI-${Math.floor(Math.random() * 90000) + 10000}`,
       clientId: client.id,
       clientName: client.name,
-      date: new Date().toISOString().split('T')[0],
+      date: isEditing && originalInvoice ? originalInvoice.date : new Date().toISOString().split('T')[0],
       items: selectedItems,
       subtotal,
       discountRate,
@@ -240,51 +261,80 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       expenseAmount: expenseAmount,
       status: paymentMethod === 'Cash' ? 'Paid' : 'Pending',
       paymentMethod: paymentMethod,
-      paidAmount: paymentMethod === 'Cash' ? grandTotal : 0,
+      paidAmount: paymentMethod === 'Cash' ? grandTotal : (isEditing && originalInvoice ? originalInvoice.paidAmount : 0),
       salesPerson: salesPerson,
-      createdBy: userId,
-      createdByName: userEmail
+      createdBy: isEditing && originalInvoice ? originalInvoice.createdBy : userId,
+      createdByName: isEditing && originalInvoice ? originalInvoice.createdByName : userEmail
     };
 
     try {
-      await db.saveInvoices([newInvoice]);
-      
-      const updatedProductEntries = filteredProducts
-        .filter(p => selectedItems.some(item => item.productId === p.id))
-        .map(p => {
-          const soldItem = selectedItems.find(item => item.productId === p.id);
-          return { ...p, stock: Math.max(0, p.stock - (soldItem?.quantity || 0)) };
-        });
+      // Handle Stock Updates
+      const productsToUpdate: Product[] = [];
+      const transactions: StockTransaction[] = [];
 
-      if (updatedProductEntries.length > 0) {
-        await db.saveProducts(updatedProductEntries);
-        
-        // Create stock transactions for the activity log
-        const transactions: StockTransaction[] = selectedItems.map(item => ({
-          id: db.generateUUID(),
-          productId: item.productId,
-          productName: item.name,
-          type: 'OUT',
-          quantity: item.quantity,
-          date: new Date().toISOString().split('T')[0],
-          note: `Invoice #${newInvoice.invoiceNumber}`,
-          createdBy: userId,
-          createdByName: userEmail
-        }));
+      if (isEditing && originalInvoice) {
+        // 1. Revert original stock changes
+        for (const oldItem of originalInvoice.items) {
+          const product = products.find(p => p.id === oldItem.productId);
+          if (product) {
+            const existingInUpdate = productsToUpdate.find(p => p.id === product.id);
+            if (existingInUpdate) {
+              existingInUpdate.stock += oldItem.quantity;
+            } else {
+              productsToUpdate.push({ ...product, stock: product.stock + oldItem.quantity });
+            }
+          }
+        }
+      }
+
+      // 2. Apply new stock changes
+      for (const newItem of selectedItems) {
+        const product = products.find(p => p.id === newItem.productId);
+        if (product) {
+          const existingInUpdate = productsToUpdate.find(p => p.id === product.id);
+          if (existingInUpdate) {
+            existingInUpdate.stock -= newItem.quantity;
+          } else {
+            productsToUpdate.push({ ...product, stock: product.stock - newItem.quantity });
+          }
+
+          // Create transaction record
+          transactions.push({
+            id: db.generateUUID(),
+            productId: newItem.productId,
+            productName: newItem.name,
+            type: 'OUT',
+            quantity: newItem.quantity,
+            date: new Date().toISOString().split('T')[0],
+            note: `${isEditing ? 'Updated' : 'New'} Invoice #${newInvoice.invoiceNumber}`,
+            createdBy: userId,
+            createdByName: userEmail
+          });
+        }
+      }
+
+      // Save everything
+      await db.saveInvoices([newInvoice]);
+      if (productsToUpdate.length > 0) {
+        await db.saveProducts(productsToUpdate);
+      }
+      if (transactions.length > 0) {
         await db.saveStockTransactions(transactions);
       }
       
       onUpdate();
       setIsModalOpen(false);
+      setIsEditing(false);
+      setEditingInvoiceId(null);
       setSelectedItems([]);
       setSelectedClientId('');
       setActiveAssetId('');
       setSalesPerson('');
       setExpenseType('');
       setExpenseAmount(0);
-      alert("Statement committed successfully. Stock updated.");
+      alert(isEditing ? "Statement updated successfully." : "Statement committed successfully. Stock updated.");
     } catch (err: any) {
-      console.error("Invoice Creation Error:", err);
+      console.error("Invoice Save Error:", err);
       alert("Failed to save invoice: " + (err.message || "Connectivity error. Try again."));
     } finally {
       setIsCreating(false);
@@ -773,27 +823,38 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       {/* Create Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-6xl rounded-[3rem] overflow-hidden flex flex-col max-h-[85vh] shadow-2xl animate-in zoom-in-95 my-auto">
-            <div className="p-8 border-b flex justify-between items-center bg-gray-50/50">
+          <div className="bg-white w-full max-w-6xl rounded-[2rem] sm:rounded-[3rem] overflow-hidden flex flex-col h-full sm:h-auto max-h-[98vh] sm:max-h-[85vh] shadow-2xl animate-in zoom-in-95 my-auto">
+            <div className="p-4 sm:p-8 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gray-50/50 sticky top-0 z-20 gap-4">
               <div className="flex items-center gap-4">
-                 <div className="p-3 bg-black text-yellow-500 rounded-2xl shadow-lg"><FileText size={24} /></div>
-                 <h3 className="text-3xl font-black uppercase tracking-tighter">Statement</h3>
+                 <div className="p-2 sm:p-3 bg-black text-yellow-500 rounded-xl sm:rounded-2xl shadow-lg"><FileText size={20} className="sm:w-6 sm:h-6" /></div>
+                 <h3 className="text-xl sm:text-3xl font-black uppercase tracking-tighter">{isEditing ? 'Edit Statement' : 'Statement'}</h3>
               </div>
-              <div className="flex bg-gray-200 p-1.5 rounded-2xl border border-gray-300">
-                <button onClick={() => setPaymentMethod('Cash')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'Cash' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Cash</button>
-                <button onClick={() => setPaymentMethod('Credit')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'Credit' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>Credit</button>
-              </div>
-              <div className="flex items-center gap-3">
-                <label className={`flex items-center gap-3 px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase cursor-pointer hover:bg-indigo-700 shadow-lg transition-all ${isParsingInvoice ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                  {isParsingInvoice ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                  {isParsingInvoice ? 'AI Parsing...' : 'AI Scan Invoice'}
-                  <input type="file" accept="image/*" onChange={handleAIParse} className="hidden" disabled={isParsingInvoice} />
-                </label>
-                <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-red-50 text-red-600 rounded-2xl"><X size={28} /></button>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end">
+                <div className="flex bg-gray-200 p-1 rounded-xl sm:rounded-2xl border border-gray-300">
+                  <button onClick={() => setPaymentMethod('Cash')} className={`px-3 sm:px-6 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'Cash' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>Cash</button>
+                  <button onClick={() => setPaymentMethod('Credit')} className={`px-3 sm:px-6 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'Credit' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>Credit</button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className={`flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-indigo-600 text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase cursor-pointer hover:bg-indigo-700 shadow-lg transition-all ${isParsingInvoice ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                    {isParsingInvoice ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    <span className="hidden xs:inline">{isParsingInvoice ? 'Parsing...' : 'AI Scan'}</span>
+                    <input type="file" accept="image/*" onChange={handleAIParse} className="hidden" disabled={isParsingInvoice} />
+                  </label>
+                  <button onClick={() => {
+                    setIsModalOpen(false);
+                    setIsEditing(false);
+                    setEditingInvoiceId(null);
+                    setSelectedItems([]);
+                    setSelectedClientId('');
+                    setSalesPerson('');
+                    setExpenseType('');
+                    setExpenseAmount(0);
+                  }} className="p-3 sm:p-4 hover:bg-red-50 text-red-600 rounded-xl sm:rounded-2xl transition-colors"><X size={24} className="sm:w-8 sm:h-8" /></button>
+                </div>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-10 space-y-10">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-10 space-y-6 sm:space-y-10">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
                 <div className="md:col-span-2">
                   <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Client Portfolio</label>
@@ -831,7 +892,11 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
                         p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
                       )
-                      .map(p => <option key={p.id} value={p.id}>{p.name} {p.size ? `(${p.size})` : ''}</option>)}
+                      .map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.size ? `(${p.size})` : ''} - Rs. {p.tp}
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <div>
@@ -873,9 +938,10 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 </div>
               </div>
 
-              <div className="border border-gray-100 rounded-[2.5rem] overflow-hidden bg-white shadow-xl">
-                <table className="w-full text-left">
-                  <thead className="bg-gray-50 text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] border-b">
+              <div className="border border-gray-100 rounded-[1.5rem] sm:rounded-[2.5rem] overflow-hidden bg-white shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left min-w-[800px] sm:min-w-0">
+                    <thead className="bg-gray-50 text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] border-b">
                     <tr>
                       <th className="px-8 py-6">Asset Description</th>
                       <th className="px-6 py-6 text-center">Size</th>
@@ -934,65 +1000,74 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 </table>
               </div>
             </div>
+          </div>
 
-             <div className="p-10 border-t bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-8">
-              <div className="grid grid-cols-4 gap-12">
+             <div className="p-4 sm:p-10 border-t bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-8">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-12 w-full sm:w-auto">
                 <div>
-                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Subtotal</p>
-                   <p className="text-xl font-black text-gray-900">Rs. {(subtotal || 0).toLocaleString()}</p>
+                   <p className="text-[8px] sm:text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Subtotal</p>
+                   <p className="text-sm sm:text-xl font-black text-gray-900">Rs. {(subtotal || 0).toLocaleString()}</p>
                 </div>
                 <div>
-                   <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Total Discount</p>
-                   <p className="text-xl font-black text-red-600">Rs. {(discountTotal || 0).toLocaleString()}</p>
+                   <p className="text-[8px] sm:text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Total Discount</p>
+                   <p className="text-sm sm:text-xl font-black text-red-600">Rs. {(discountTotal || 0).toLocaleString()}</p>
                 </div>
                 <div>
-                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tax ({taxRate}%)</p>
-                   <p className="text-xl font-black text-yellow-600">Rs. {(taxTotal || 0).toLocaleString()}</p>
+                   <p className="text-[8px] sm:text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tax ({taxRate}%)</p>
+                   <p className="text-sm sm:text-xl font-black text-yellow-600">Rs. {(taxTotal || 0).toLocaleString()}</p>
                 </div>
                 <div>
-                   <p className="text-[10px] font-black text-yellow-600 uppercase tracking-widest mb-1">Final Amount</p>
-                   <p className="text-4xl font-black text-black tracking-tighter">Rs. {(grandTotal || 0).toLocaleString()}</p>
+                   <p className="text-[8px] sm:text-[10px] font-black text-yellow-600 uppercase tracking-widest mb-1">Final Amount</p>
+                   <p className="text-xl sm:text-4xl font-black text-black tracking-tighter">Rs. {(grandTotal || 0).toLocaleString()}</p>
                 </div>
               </div>
               <button 
                 onClick={handleCreateInvoice} 
                 disabled={isCreating || selectedItems.length === 0} 
-                className="px-14 py-6 bg-black text-white rounded-3xl font-black uppercase tracking-[0.2em] text-[10px] hover:bg-gray-900 transition-all flex items-center gap-4 disabled:opacity-50 shadow-xl"
+                className="w-full sm:w-auto px-8 sm:px-14 py-4 sm:py-6 bg-black text-white rounded-2xl sm:rounded-3xl font-black uppercase tracking-[0.2em] text-[8px] sm:text-[10px] hover:bg-gray-900 transition-all flex items-center justify-center gap-4 disabled:opacity-50 shadow-xl"
               >
-                {isCreating ? <Loader2 className="animate-spin text-yellow-500" size={24} /> : <>Commit Record <ArrowRight size={20} className="text-yellow-500" /></>}
+                {isCreating ? <Loader2 className="animate-spin text-yellow-500" size={20} /> : <>{isEditing ? 'Update Statement' : 'Commit Record'} <ArrowRight size={18} className="text-yellow-500" /></>}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Detail View Modal */}
+       {/* Detail View Modal */}
       {viewingInvoice && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto invoice-modal-overlay">
-          <div className="bg-white w-full max-w-5xl max-h-[85vh] rounded-[3rem] overflow-hidden flex flex-col shadow-2xl my-auto animate-in zoom-in-95 duration-200 invoice-modal-content">
-            <div className="p-8 border-b flex justify-between items-center bg-gray-50/50 sticky top-0 z-10 no-print border-gray-100">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/95 backdrop-blur-md p-2 sm:p-4 overflow-y-auto invoice-modal-overlay">
+          <div className="bg-white w-full max-w-5xl h-full sm:h-auto max-h-[98vh] sm:max-h-[85vh] rounded-[2rem] sm:rounded-[3rem] overflow-hidden flex flex-col shadow-2xl my-auto animate-in zoom-in-95 duration-200 invoice-modal-content">
+            <div className="p-4 sm:p-8 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gray-50/50 sticky top-0 z-10 no-print border-gray-100 gap-4">
               <div className="flex items-center gap-4">
-                 <FileText size={20} className="text-yellow-500" />
+                 <FileText size={18} className="text-yellow-500" />
                  <div className="flex flex-col">
-                   <h3 className="text-xl font-black uppercase tracking-widest">{viewingInvoice.invoiceNumber}</h3>
+                   <h3 className="text-sm sm:text-xl font-black uppercase tracking-widest">{viewingInvoice.invoiceNumber}</h3>
                    {viewingInvoice.salesPerson && (
-                     <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest -mt-1">Sales Person: {viewingInvoice.salesPerson}</p>
+                     <p className="text-[7px] sm:text-[9px] font-bold text-gray-400 uppercase tracking-widest -mt-1">Sales Person: {viewingInvoice.salesPerson}</p>
                    )}
                  </div>
-                 <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                 <span className={`px-3 sm:px-4 py-1 rounded-full text-[7px] sm:text-[9px] font-black uppercase tracking-widest border ${
                    viewingInvoice.status === 'Paid' ? 'bg-green-50 text-green-700 border-green-200' : 
                    viewingInvoice.status === 'Returned' ? 'bg-red-50 text-red-700 border-red-200' :
                    'bg-amber-50 text-amber-700 border-amber-200'
                  }`}>{viewingInvoice.status}</span>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end">
+                {viewingInvoice.status !== 'Returned' && (
+                  <button 
+                    onClick={() => handleEditInvoice(viewingInvoice)}
+                    className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-yellow-500 text-black rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-yellow-400 shadow-lg transition-all"
+                  >
+                    <Pencil size={14} className="sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Edit</span>
+                  </button>
+                )}
                 {viewingInvoice.status !== 'Returned' && (
                   <button 
                     onClick={() => handleReturnInvoice(viewingInvoice)}
                     disabled={isReturning}
-                    className="flex items-center gap-3 px-6 py-3 bg-orange-600 text-white rounded-xl font-black text-[10px] uppercase hover:bg-orange-700 shadow-lg transition-all disabled:opacity-50"
+                    className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-orange-600 text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-orange-700 shadow-lg transition-all disabled:opacity-50"
                   >
-                    {isReturning ? <Loader2 className="animate-spin" size={18} /> : <RotateCcw size={18} />} Return Invoice
+                    {isReturning ? <Loader2 className="animate-spin" size={14} /> : <RotateCcw size={14} />} <span className="hidden xs:inline">Return</span>
                   </button>
                 )}
                 {viewingInvoice.status === 'Pending' && (
@@ -1002,36 +1077,36 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         setPaymentAmount(viewingInvoice.total - (viewingInvoice.paidAmount || 0));
                         setIsRecordingPayment(true);
                       }}
-                      className="flex items-center gap-3 px-6 py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase hover:bg-blue-700 shadow-lg transition-all"
+                      className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-blue-600 text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-blue-700 shadow-lg transition-all"
                     >
-                      <Wallet size={18} /> Record Payment
+                      <Wallet size={14} /> <span className="hidden xs:inline">Pay</span>
                     </button>
                     <button 
                       onClick={() => handleMarkAsPaid(viewingInvoice)}
-                      className="flex items-center gap-3 px-6 py-3 bg-green-600 text-white rounded-xl font-black text-[10px] uppercase hover:bg-green-700 shadow-lg transition-all"
+                      className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-green-600 text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-green-700 shadow-lg transition-all"
                     >
-                      <CheckCircle size={18} /> Mark as Paid
+                      <CheckCircle size={14} /> <span className="hidden xs:inline">Paid</span>
                     </button>
                   </>
                 )}
-                <button onClick={handlePrint} className="flex items-center gap-3 px-6 py-3 bg-white border border-gray-200 rounded-xl font-black text-[10px] uppercase hover:bg-gray-50 transition-all"><Printer size={18} /> Print</button>
-                <button onClick={exportToPdf} disabled={isGeneratingPdf} className="flex items-center gap-3 px-6 py-3 bg-black text-white rounded-xl font-black text-[10px] uppercase hover:bg-gray-900 shadow-lg transition-all">
-                  {isGeneratingPdf ? <Loader2 className="animate-spin text-yellow-500" size={18} /> : <Download size={18} />} PDF
+                <button onClick={handlePrint} className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-white border border-gray-200 rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-gray-50 transition-all"><Printer size={14} /> <span className="hidden xs:inline">Print</span></button>
+                <button onClick={exportToPdf} disabled={isGeneratingPdf} className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-black text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-gray-900 shadow-lg transition-all">
+                  {isGeneratingPdf ? <Loader2 className="animate-spin text-yellow-500" size={14} /> : <Download size={14} />} <span className="hidden xs:inline">PDF</span>
                 </button>
                 {role === 'Admin' && (
                   <button 
                     onClick={(e) => triggerDeleteConfirm(e, viewingInvoice)} 
-                    className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all"
+                    className="p-2 sm:p-3 bg-red-50 text-red-600 rounded-lg sm:rounded-xl hover:bg-red-100 transition-all"
                     title="Purge Invoice"
                   >
-                    <Trash2 size={24} />
+                    <Trash2 size={18} className="sm:w-6 sm:h-6" />
                   </button>
                 )}
-                <button onClick={() => setViewingInvoice(null)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl transition-all"><X size={24} /></button>
+                <button onClick={() => setViewingInvoice(null)} className="p-3 sm:p-4 bg-gray-100 hover:bg-red-50 hover:text-red-600 rounded-xl sm:rounded-2xl transition-all shadow-sm"><X size={24} className="sm:w-8 sm:h-8" /></button>
               </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-16 md:p-24 bg-white" id="printable-invoice-area">
+            <div className="flex-1 overflow-y-auto p-6 sm:p-16 md:p-24 bg-white" id="printable-invoice-area">
               <div className="flex justify-between items-start mb-24">
                 <InvoiceLogo />
                 <div className="text-right">
@@ -1074,9 +1149,10 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
               </div>
 
               <div className="mb-20">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="border-b-4 border-black">
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse min-w-[800px] sm:min-w-0">
+                    <thead>
+                      <tr className="border-b-4 border-black">
                       <th className="py-6 text-left text-[11px] font-black uppercase tracking-widest">Item Description</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Size</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
@@ -1148,6 +1224,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   </tfoot>
                 </table>
               </div>
+            </div>
 
               {/* Payment History Section */}
               {payments.length > 0 && (
@@ -1224,19 +1301,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       {/* Record Payment Modal */}
       {isRecordingPayment && viewingInvoice && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
-          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-              <h3 className="text-xl font-black uppercase tracking-tighter">Record Payment</h3>
+          <div className="bg-white w-full max-w-md rounded-[2rem] sm:rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 sm:p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 className="text-lg sm:text-xl font-black uppercase tracking-tighter">Record Payment</h3>
               <button onClick={() => setIsRecordingPayment(false)} className="text-gray-400 hover:text-red-600 transition-colors"><X size={24} /></button>
             </div>
-            <div className="p-10 space-y-6">
+            <div className="p-6 sm:p-10 space-y-6">
               <div>
                 <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Payment Amount (Rs.)</label>
                 <input 
                   type="number" 
                   value={paymentAmount} 
                   onChange={e => setPaymentAmount(parseFloat(e.target.value) || 0)}
-                  className="w-full p-5 bg-gray-50 border border-gray-200 rounded-2xl font-black text-xl outline-none focus:ring-4 focus:ring-blue-50 transition-all"
+                  className="w-full p-4 sm:p-5 bg-gray-50 border border-gray-200 rounded-xl sm:rounded-2xl font-black text-lg sm:text-xl outline-none focus:ring-4 focus:ring-blue-50 transition-all"
                   placeholder="0.00"
                 />
                 <p className="mt-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Remaining: Rs. {(viewingInvoice.total - (viewingInvoice.paidAmount || 0)).toLocaleString()}</p>
@@ -1246,14 +1323,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 <textarea 
                   value={paymentNote}
                   onChange={e => setPaymentNote(e.target.value)}
-                  className="w-full p-5 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-50 transition-all resize-none"
+                  className="w-full p-4 sm:p-5 bg-gray-50 border border-gray-200 rounded-xl sm:rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-blue-50 transition-all resize-none"
                   rows={3}
                   placeholder="e.g. Partial payment via bank transfer..."
                 />
               </div>
               <button 
                 onClick={handleRecordPayment}
-                className="w-full py-6 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-blue-700 shadow-xl transition-all"
+                className="w-full py-4 sm:py-6 bg-blue-600 text-white rounded-xl sm:rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-blue-700 shadow-xl transition-all"
               >
                 Confirm Payment
               </button>

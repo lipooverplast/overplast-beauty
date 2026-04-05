@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Package, FileText, Users, Settings, ChevronRight, X, Repeat,
-  PanelLeftClose, PanelLeft, Loader2, CloudOff, Database, Cloud, LogOut, AlertCircle, RefreshCw, CheckCircle, Sparkles, UserCheck, Shield, Ban, UserRoundSearch, Star, Crown, Fingerprint, DatabaseZap, Zap
+  PanelLeftClose, PanelLeft, Loader2, CloudOff, Database, Cloud, LogOut, AlertCircle, RefreshCw, CheckCircle, Sparkles, UserCheck, Shield, Ban, UserRoundSearch, Star, Crown, Fingerprint, DatabaseZap, Zap, BarChart3
 } from 'lucide-react';
-import { ViewType, Product, Client, Invoice, Profile, UserRole } from './types';
+import { ViewType, Product, Client, Invoice, Profile, UserRole, StockTransaction } from './types';
 import { db } from './db';
 import { isSupabaseConfigured, supabase, clearSupabaseConfig } from './supabaseClient';
 import Dashboard from './components/Dashboard';
@@ -14,6 +14,7 @@ import RecurringInvoices from './components/RecurringInvoices';
 import Clients from './components/Clients';
 import AdminOffice from './components/AdminOffice';
 import SettingsView from './components/Settings';
+import SalesReport from './components/SalesReport';
 import Auth from './components/Auth';
 
 import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from './constants';
@@ -37,6 +38,7 @@ const App: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [transactions, setTransactions] = useState<StockTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSync, setLastSync] = useState<string>(new Date().toLocaleTimeString());
@@ -187,14 +189,16 @@ const App: React.FC = () => {
                       user?.email === ADMIN_EMAIL;
       const filterId = isAdmin ? undefined : user?.id;
 
-      const [p, c, i] = await Promise.all([
+      const [p, c, i, t] = await Promise.all([
         db.getProducts(undefined), // Allow all users to see all products
         db.getClients(filterId),
-        db.getInvoices(filterId)
+        db.getInvoices(filterId),
+        db.getStockTransactions(filterId)
       ]);
       setProducts(p || []);
       setClients(c || []);
       setInvoices(i || []);
+      setTransactions(t || []);
       setLastSync(new Date().toLocaleTimeString());
       setDbError(false);
     } catch (err: any) {
@@ -214,7 +218,7 @@ const App: React.FC = () => {
     setActiveView('invoices');
   };
 
-  const isAdmin = !isSupabaseConfigured || profile?.role === 'Admin' || user?.email === ADMIN_EMAIL;
+  const isAdmin = !isSupabaseConfigured || profile?.role?.toLowerCase() === 'admin' || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
   const effectiveRole = isAdmin ? 'Admin' : 'Staff';
 
   if (profile?.status === 'Suspended') {
@@ -247,20 +251,21 @@ const App: React.FC = () => {
     invoices: <Invoices invoices={invoices} products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} userEmail={user?.email} initialClientId={preselectedClientId} onClearInitialClient={() => setPreselectedClientId(null)} />,
     recurring: <RecurringInvoices products={products} clients={clients} onUpdate={refreshData} role={effectiveRole} userId={user?.id} />,
     clients: <Clients clients={clients} invoices={invoices} onUpdate={refreshData} onCreateInvoice={handleCreateInvoiceForClient} role={effectiveRole} userId={user?.id} />,
+    reports: <SalesReport products={products} invoices={invoices} transactions={transactions} role={effectiveRole} userId={user?.id || ''} />,
     'admin-office': isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} userEmail={user?.email} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
     users: isAdmin ? <AdminOffice onUpdate={refreshData} onNavigate={setActiveView} invoices={invoices} clients={clients} products={products} userId={user?.id} userEmail={user?.email} role={effectiveRole} /> : <Dashboard products={products} invoices={invoices} clients={clients} role={effectiveRole} userId={user?.id || ''} onNavigate={setActiveView} />,
     settings: <SettingsView role={effectiveRole} userId={user?.id || ''} />,
   }[activeView];
 
   return (
-    <div className="h-screen flex bg-gray-50 text-gray-900 overflow-hidden relative">
+    <div className="h-screen flex bg-gray-50 text-gray-900 overflow-hidden relative print:h-auto print:overflow-visible">
       {/* Luxury Background Elements for the entire app */}
-      <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-50/10 via-transparent to-transparent pointer-events-none"></div>
-      <div className="absolute -top-48 -left-48 w-96 h-96 bg-yellow-100 rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
-      <div className="absolute -bottom-48 -right-48 w-96 h-96 bg-gray-200 rounded-full blur-[120px] opacity-20 pointer-events-none"></div>
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-50/5 rounded-full blur-[160px] pointer-events-none"></div>
+      <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-50/10 via-transparent to-transparent pointer-events-none no-print"></div>
+      <div className="absolute -top-48 -left-48 w-96 h-96 bg-yellow-100 rounded-full blur-[120px] opacity-20 pointer-events-none no-print"></div>
+      <div className="absolute -bottom-48 -right-48 w-96 h-96 bg-gray-200 rounded-full blur-[120px] opacity-20 pointer-events-none no-print"></div>
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-50/5 rounded-full blur-[160px] pointer-events-none no-print"></div>
 
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 transform transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 transform transition-transform duration-300 no-print ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-full flex flex-col p-6 overflow-y-auto">
           <div className="flex items-center justify-between mb-10 px-2">
             <div className="flex items-center gap-3">
@@ -285,6 +290,7 @@ const App: React.FC = () => {
                   { id: 'invoices', label: 'Billing', icon: FileText },
                   { id: 'recurring', label: 'Subscriptions', icon: Repeat },
                   { id: 'clients', label: 'Network', icon: Users },
+                  { id: 'reports', label: 'Reports', icon: BarChart3 },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -337,8 +343,8 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      <main className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarOpen ? 'md:ml-72' : 'ml-0'}`}>
-        <header className="h-20 bg-white/90 backdrop-blur-xl border-b border-gray-200 flex items-center justify-between px-6 sticky top-0 z-40 shadow-sm">
+      <main className={`flex-1 flex flex-col min-w-0 transition-all duration-300 print:ml-0 print:h-auto print:overflow-visible ${isSidebarOpen ? 'md:ml-72' : 'ml-0'}`}>
+        <header className="h-20 bg-white/90 backdrop-blur-xl border-b border-gray-200 flex items-center justify-between px-6 sticky top-0 z-40 shadow-sm no-print">
           <div className="flex items-center gap-4">
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2.5 bg-gray-50 text-gray-400 border border-gray-200 rounded-xl hover:text-black hover:border-black transition-all"><PanelLeft size={20} /></button>
             <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 hidden sm:block">Infrastructure Management Hub</h2>
@@ -365,7 +371,7 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="p-6 md:p-10 w-full flex-1 overflow-y-auto relative">
+        <div className="p-6 md:p-10 w-full flex-1 overflow-y-auto relative print:overflow-visible print:h-auto print:p-0">
           <div className="w-full max-w-[1600px] mx-auto space-y-6">
             {dbError && (
               <div className="bg-red-50 border-4 border-red-600 p-8 rounded-[2rem] shadow-xl animate-in slide-in-from-top-4 duration-500">
@@ -380,6 +386,11 @@ const App: React.FC = () => {
                          <p className="text-xs text-red-900 mb-2">Run this in Supabase SQL Editor:</p>
                          <div className="bg-gray-900 p-3 rounded-lg text-[10px] font-mono text-green-400 break-all select-all">
                            ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+                           ALTER TABLE public.products DISABLE ROW LEVEL SECURITY;
+                           ALTER TABLE public.clients DISABLE ROW LEVEL SECURITY;
+                           ALTER TABLE public.invoices DISABLE ROW LEVEL SECURITY;
+                           ALTER TABLE public.stock_transactions DISABLE ROW LEVEL SECURITY;
+                           ALTER TABLE public.recurring_invoices DISABLE ROW LEVEL SECURITY;
                          </div>
                        </div>
                        <div className="bg-white p-4 rounded-xl border border-red-200">

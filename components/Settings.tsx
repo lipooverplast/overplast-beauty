@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS public.products (
   tp NUMERIC DEFAULT 0,
   stock INTEGER DEFAULT 0,
   min_stock INTEGER DEFAULT 0,
+  color TEXT,
+  product_type TEXT,
   description TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -135,6 +137,8 @@ CREATE TABLE IF NOT EXISTS public.stock_transactions (
   product_id TEXT,
   product_name TEXT,
   product_size TEXT,
+  product_color TEXT,
+  product_type TEXT,
   type TEXT,
   quantity INTEGER,
   date DATE DEFAULT CURRENT_DATE,
@@ -153,30 +157,67 @@ ALTER TABLE public.payments DISABLE ROW LEVEL SECURITY;
 
 -- ADD MISSING COLUMNS TO EXISTING TABLES
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'Staff';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
+
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS size TEXT;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS user_email TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS sales_person TEXT;
-ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
-ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS sales_person TEXT;
-ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS user_email TEXT;
-ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS product_size TEXT;
-ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS color TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS product_type TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS price NUMERIC DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS cost NUMERIC DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS mrp NUMERIC DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS tp NUMERIC DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS min_stock INTEGER DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General';
 
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS doctor_name TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS hospital_name TEXT;
 ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS doctor_phone TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS address TEXT;
+
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS sales_person TEXT;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS paid_amount NUMERIC DEFAULT 0;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_rate NUMERIC DEFAULT 0;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS discount_total NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS tax_rate NUMERIC DEFAULT 0;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS tax_total NUMERIC DEFAULT 0;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS expense_type TEXT;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS expense_amount NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Pending';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'Cash';
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS items JSONB;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS subtotal NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0;
+
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS sales_person TEXT;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS discount_rate NUMERIC DEFAULT 0;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS discount_total NUMERIC DEFAULT 0;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS tax_rate NUMERIC DEFAULT 0;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS tax_total NUMERIC DEFAULT 0;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS frequency TEXT;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS items JSONB;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS subtotal NUMERIC DEFAULT 0;
+ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0;
+
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS product_size TEXT;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS product_color TEXT;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS product_type TEXT;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS type TEXT;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS quantity INTEGER;
+ALTER TABLE public.stock_transactions ADD COLUMN IF NOT EXISTS note TEXT;
+
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS amount NUMERIC DEFAULT 0;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS note TEXT;
 
 -- GRANT ALL PERMISSIONS TO USERS
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, postgres;

@@ -216,6 +216,8 @@ export const db = {
             minStock: Number(p.min_stock) || 0, 
             description: p.description || '',
             size: p.size || '',
+            color: p.color || '',
+            productType: p.product_type || '',
             createdBy: p.user_id || 'admin',
             createdByName: createdByName,
             createdAt: p.created_at
@@ -287,10 +289,12 @@ export const db = {
           tp: Number(p.tp) || 0,
           stock: Number(p.stock) || 0,
           min_stock: Number(p.minStock) || 0,
+          color: p.color || '',
+          product_type: p.productType || '',
           description: p.description || '',
           size: p.size || ''
         };
-        row.user_id = p.createdBy || effectiveUserId;
+        row.user_id = (p.createdBy && isValidUUID(p.createdBy)) ? p.createdBy : effectiveUserId;
         row.user_email = p.createdByName || effectiveUserEmail;
         return row;
       });
@@ -711,6 +715,8 @@ export const db = {
           id: t.id, productId: t.product_id, productName: t.product_name,
           type: t.type, quantity: Number(t.quantity), date: t.date, note: t.note,
           productSize: t.product_size,
+          productColor: t.product_color,
+          productType: t.product_type,
           createdBy: t.user_id,
           createdByName: t.user_email,
           createdAt: t.created_at
@@ -746,7 +752,9 @@ export const db = {
           user_email: t.createdByName || effectiveUserEmail,
           product_id: t.productId, product_name: t.productName,
           type: t.type, quantity: t.quantity, date: t.date, note: t.note,
-          product_size: t.productSize
+          product_size: t.productSize,
+          product_color: t.productColor,
+          product_type: t.productType
         };
         row.id = isValidUUID(t.id) ? t.id : generateUUID();
         return row;
@@ -871,6 +879,8 @@ export const db = {
           productId: item.productId,
           productName: item.name,
           productSize: item.size,
+          productColor: item.color,
+          productType: item.productType,
           type: 'RETURN',
           quantity: item.quantity,
           date: new Date().toISOString().split('T')[0],

@@ -20,7 +20,10 @@ interface SalesReportProps {
 }
 
 const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transactions, role, userId }) => {
+  const [reportMode, setReportMode] = useState<'monthly' | 'cumulative'>('monthly');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [searchSrn, setSearchSrn] = useState('');
 
   const months = [
@@ -111,7 +114,6 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
   }, [invoices, transactions]);
 
   const reportData = useMemo(() => {
-    const monthStr = selectedMonth;
     const isStaff = role?.toLowerCase() === 'staff';
     
     const filteredInvoices = isStaff 
@@ -122,8 +124,23 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
       ? transactions.filter(t => t.createdBy === userId)
       : transactions;
 
-    const monthlyInvoices = filteredInvoices.filter(inv => inv.date.startsWith(monthStr) && inv.status !== 'Returned');
-    const monthlyTransactions = filteredTransactions.filter(t => t.date.startsWith(monthStr));
+    let monthlyInvoices: Invoice[] = [];
+    let monthlyTransactions: StockTransaction[] = [];
+    let rangeStart = '';
+    let rangeEnd = '';
+
+    if (reportMode === 'monthly') {
+      const monthStr = selectedMonth;
+      rangeStart = monthStr + '-01';
+      rangeEnd = monthStr + '-31'; // Simplified for filtering
+      monthlyInvoices = filteredInvoices.filter(inv => inv.date.startsWith(monthStr) && inv.status !== 'Returned');
+      monthlyTransactions = filteredTransactions.filter(t => t.date.startsWith(monthStr));
+    } else {
+      rangeStart = startDate;
+      rangeEnd = endDate;
+      monthlyInvoices = filteredInvoices.filter(inv => inv.date >= startDate && inv.date <= endDate && inv.status !== 'Returned');
+      monthlyTransactions = filteredTransactions.filter(t => t.date >= startDate && t.date <= endDate);
+    }
 
     return products.map((product, index) => {
       const productInvoices = monthlyInvoices.filter(inv => inv.items.some(i => i.productId === product.id));
@@ -139,20 +156,20 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
       let openingStockUnit = 0;
       
       if (isStaff) {
-        // For staff, opening stock is the sum of THEIR transactions before the month start
-        const transactionsBeforeMonth = filteredTransactions.filter(t => 
+        // For staff, opening stock is the sum of THEIR transactions before the range start
+        const transactionsBeforeRange = filteredTransactions.filter(t => 
           t.productId === product.id && 
-          t.date < monthStr + '-01'
+          t.date < rangeStart
         );
         
-        const inBefore = transactionsBeforeMonth.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
-        const outBefore = transactionsBeforeMonth.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
-        const returnBefore = transactionsBeforeMonth.filter(t => t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
+        const inBefore = transactionsBeforeRange.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
+        const outBefore = transactionsBeforeRange.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
+        const returnBefore = transactionsBeforeRange.filter(t => t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
         
         openingStockUnit = inBefore - outBefore - returnBefore;
       } else {
-        // For admin, opening stock is global: current stock minus all transactions after month start
-        const transactionsAfterStart = transactions.filter(t => t.productId === product.id && t.date >= monthStr + '-01');
+        // For admin, opening stock is global: current stock minus all transactions after range start
+        const transactionsAfterStart = transactions.filter(t => t.productId === product.id && t.date >= rangeStart);
         const inAfterStart = transactionsAfterStart.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
         const outAfterStart = transactionsAfterStart.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
         const returnAfterStart = transactionsAfterStart.filter(t => t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
@@ -274,11 +291,19 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
              matchesTotalSalesUnit && matchesTotalSalesValue && 
              matchesClosingStockUnit && matchesClosingStockValue;
     });
-  }, [products, invoices, transactions, selectedMonth, searchSrn, searchProduct, searchCategory, searchSize, searchMrp, searchTp, 
+  }, [products, invoices, transactions, selectedMonth, reportMode, startDate, endDate, searchSrn, searchProduct, searchCategory, searchSize, searchMrp, searchTp, 
       searchSalesPerson, searchOpeningStockUnit, searchOpeningStockValue, searchReceivedUnit, searchReceivedValue, 
       searchTotalStockUnit, searchReturnUnit, searchReturnValue, searchDiscount, 
       searchCashSalesUnit, searchCashSalesValue, searchCreditSalesUnit, searchCreditSalesValue, 
       searchTotalSalesUnit, searchTotalSalesValue, searchClosingStockUnit, searchClosingStockValue]);
+
+  const reportTitle = reportMode === 'monthly' 
+    ? new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }).toUpperCase()
+    : `${new Date(startDate).toLocaleDateString('en-US', { day: '2-digit', month: 'short' })} - ${new Date(endDate).toLocaleDateString('en-US', { day: '2-digit', month: 'short' })}`.toUpperCase();
+
+  const reportPeriodLabel = reportMode === 'monthly'
+    ? new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : `${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}`;
 
   const handlePrint = () => {
     const printArea = document.getElementById('sales-report-content');
@@ -301,7 +326,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
     printWindow.document.write(`
       <html>
         <head>
-          <title>Sales Report - ${monthName}</title>
+          <title>Sales Report - ${reportTitle}</title>
           ${styles}
           <style>
             body { 
@@ -365,7 +390,8 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
       const canvasHeightInPdf = imgHeight * ratio;
       
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, canvasHeightInPdf);
-      pdf.save(`Sales_Stocks_Report_${selectedMonth}.pdf`);
+      const filename = reportMode === 'monthly' ? selectedMonth : `${startDate}_to_${endDate}`;
+      pdf.save(`Sales_Stocks_Report_${filename}.pdf`);
     } catch (err) {
       console.error('PDF Error:', err);
     } finally {
@@ -403,62 +429,106 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Sales & Stocks");
-    XLSX.writeFile(workbook, `Sales_Stocks_Report_${selectedMonth}.xlsx`);
+    const filename = reportMode === 'monthly' ? selectedMonth : `${startDate}_to_${endDate}`;
+    XLSX.writeFile(workbook, `Sales_Stocks_Report_${filename}.xlsx`);
   };
-
-  const monthName = new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }).toUpperCase();
 
   return (
     <div id="sales-report-content" className="space-y-6 animate-in fade-in duration-500 bg-black p-8 rounded-[3rem] print:p-0 print:bg-white print:space-y-0">
       {/* Header Controls */}
       <div className="bg-gray-900 p-6 rounded-[2.5rem] border border-gray-800 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-4 no-print">
         <div className="flex flex-col gap-4 w-full md:w-auto">
-          <div className="flex items-center gap-4 p-2 rounded-2xl transition-all">
-            <div className="p-3 bg-yellow-900/20 text-yellow-500 rounded-xl">
-              <Calendar size={20} />
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
+            <div className="flex bg-gray-800 p-1 rounded-xl border border-gray-700">
+              <button 
+                onClick={() => setReportMode('monthly')}
+                className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${reportMode === 'monthly' ? 'bg-yellow-500 text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
+              >
+                Monthly
+              </button>
+              <button 
+                onClick={() => setReportMode('cumulative')}
+                className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${reportMode === 'cumulative' ? 'bg-yellow-500 text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
+              >
+                Cumulative
+              </button>
             </div>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Report Month</span>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={handlePrevMonth}
-                  className="p-1.5 bg-gray-800 text-gray-400 rounded-lg hover:text-white hover:bg-gray-700 transition-all"
-                >
-                  <ChevronDown className="rotate-90" size={14} />
-                </button>
-                
-                <select 
-                  value={currentMonth}
-                  onChange={(e) => handleMonthChange(Number(e.target.value))}
-                  className="bg-transparent text-white font-black text-sm border-none focus:ring-0 cursor-pointer appearance-none pr-2"
-                >
-                  {months.map((m, i) => (
-                    <option key={m} value={i + 1} className="bg-gray-900 text-white">{m}</option>
-                  ))}
-                </select>
 
-                <select 
-                  value={currentYear}
-                  onChange={(e) => handleYearChange(Number(e.target.value))}
-                  className="bg-transparent text-white font-black text-sm border-none focus:ring-0 cursor-pointer appearance-none"
-                >
-                  {years.map(y => (
-                    <option key={y} value={y} className="bg-gray-900 text-white">{y}</option>
-                  ))}
-                </select>
+            {reportMode === 'monthly' ? (
+              <div className="flex items-center gap-4 p-2 rounded-2xl transition-all">
+                <div className="p-3 bg-yellow-900/20 text-yellow-500 rounded-xl">
+                  <Calendar size={20} />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Report Month</span>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={handlePrevMonth}
+                      className="p-1.5 bg-gray-800 text-gray-400 rounded-lg hover:text-white hover:bg-gray-700 transition-all"
+                    >
+                      <ChevronDown className="rotate-90" size={14} />
+                    </button>
+                    
+                    <select 
+                      value={currentMonth}
+                      onChange={(e) => handleMonthChange(Number(e.target.value))}
+                      className="bg-transparent text-white font-black text-sm border-none focus:ring-0 cursor-pointer appearance-none pr-2"
+                    >
+                      {months.map((m, i) => (
+                        <option key={m} value={i + 1} className="bg-gray-900 text-white">{m}</option>
+                      ))}
+                    </select>
 
-                <button 
-                  onClick={handleNextMonth}
-                  className="p-1.5 bg-gray-800 text-gray-400 rounded-lg hover:text-white hover:bg-gray-700 transition-all"
-                >
-                  <ChevronDown className="-rotate-90" size={14} />
-                </button>
+                    <select 
+                      value={currentYear}
+                      onChange={(e) => handleYearChange(Number(e.target.value))}
+                      className="bg-transparent text-white font-black text-sm border-none focus:ring-0 cursor-pointer appearance-none"
+                    >
+                      {years.map(y => (
+                        <option key={y} value={y} className="bg-gray-900 text-white">{y}</option>
+                      ))}
+                    </select>
+
+                    <button 
+                      onClick={handleNextMonth}
+                      className="p-1.5 bg-gray-800 text-gray-400 rounded-lg hover:text-white hover:bg-gray-700 transition-all"
+                    >
+                      <ChevronDown className="-rotate-90" size={14} />
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-4 p-2 rounded-2xl transition-all">
+                <div className="p-3 bg-yellow-900/20 text-yellow-500 rounded-xl">
+                  <Filter size={20} />
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">From</span>
+                    <input 
+                      type="date" 
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="bg-gray-800 text-white font-black text-xs border border-gray-700 rounded-lg px-3 py-2 focus:ring-1 focus:ring-yellow-500 outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">To</span>
+                    <input 
+                      type="date" 
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="bg-gray-800 text-white font-black text-xs border border-gray-700 rounded-lg px-3 py-2 focus:ring-1 focus:ring-yellow-500 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           
           {/* Active Months Quick Select */}
-          {activeMonths.length > 0 && (
+          {reportMode === 'monthly' && activeMonths.length > 0 && (
             <div className="flex flex-wrap gap-2 px-2">
               <span className="text-[8px] font-black text-gray-600 uppercase tracking-widest w-full mb-1">Active Months:</span>
               {activeMonths.slice(0, 6).map(m => (
@@ -512,7 +582,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
             <div>
               <h1 className="text-3xl font-black uppercase tracking-tighter text-black mb-2">Sales & Stock Report</h1>
               <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">
-                Reporting Period: {new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                Reporting Period: {reportPeriodLabel}
               </p>
             </div>
             <div className="text-right">
@@ -523,7 +593,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
         </div>
         <div className="bg-black p-8 flex items-center justify-between border-b border-gray-800 print:bg-white print:border-gray-200 print:p-4">
           <h2 className="text-3xl font-black text-white uppercase tracking-tighter print:text-black print:text-xl">
-            SALES & STOCKS {monthName}
+            SALES & STOCKS {reportTitle}
           </h2>
           <div className="flex items-center gap-4">
             <img src={APP_LOGO_URL} alt="Logo" className="h-12 w-12 object-contain invert print:invert-0" />
@@ -567,26 +637,26 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                 <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">TOTAL SALES</th>
                 <th colSpan={2} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest text-center print:text-black print:p-1">CLOSING STOCKS</th>
               </tr>
-              <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
-                <th colSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">CASH</th>
-                <th colSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">CREDIT</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
-                <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest text-center print:text-black print:p-1">VALUE</th>
-              </tr>
-              <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
-                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
-                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center">VALUE</th>
-                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center">UNIT</th>
-                <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center">VALUE</th>
-              </tr>
+      <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+        <th colSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">CASH</th>
+        <th colSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">CREDIT</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+        <th rowSpan={2} className="p-2 text-[9px] font-black text-gray-500 uppercase tracking-widest text-center print:text-black print:p-1">VALUE</th>
+      </tr>
+      <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
+        <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+        <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+        <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">UNIT</th>
+        <th className="p-2 text-[8px] font-black text-gray-600 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">VALUE</th>
+      </tr>
               <tr className="bg-black border-b border-gray-800 print:hidden">
                 <th className="p-2 border-r border-gray-800">
                   <input 

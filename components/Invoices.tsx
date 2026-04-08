@@ -147,6 +147,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         productId: product.id,
         name: product.name,
         size: product.size,
+        color: product.color,
+        productType: product.productType,
         quantity: 1,
         price: tp,
         mrp: mrp,
@@ -303,6 +305,9 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
             id: db.generateUUID(),
             productId: newItem.productId,
             productName: newItem.name,
+            productSize: newItem.size,
+            productColor: newItem.color,
+            productType: newItem.productType,
             type: 'OUT',
             quantity: newItem.quantity,
             date: new Date().toISOString().split('T')[0],
@@ -945,6 +950,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     <tr>
                       <th className="px-8 py-6">Asset Description</th>
                       <th className="px-6 py-6 text-center">Size</th>
+                      <th className="px-6 py-6 text-center">Color</th>
+                      <th className="px-6 py-6 text-center">Type</th>
                       <th className="px-6 py-6 text-center">MRP</th>
                       <th className="px-6 py-6 text-center">Trade Price</th>
                       <th className="px-6 py-6 text-center">Disc (%)</th>
@@ -967,6 +974,24 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                             : 'bg-gray-50 border-gray-100 text-gray-400'
                           }`}>
                             {item.size || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                            item.color 
+                            ? 'bg-blue-50 border-blue-100 text-blue-600' 
+                            : 'bg-gray-50 border-gray-100 text-gray-400'
+                          }`}>
+                            {item.color || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                            item.productType 
+                            ? 'bg-emerald-50 border-emerald-100 text-emerald-600' 
+                            : 'bg-gray-50 border-gray-100 text-gray-400'
+                          }`}>
+                            {item.productType || 'N/A'}
                           </span>
                         </td>
                         <td className="px-6 py-5 text-center text-xs font-bold text-gray-400 line-through">Rs. {item.mrp}</td>
@@ -1155,6 +1180,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <tr className="border-b-4 border-black">
                       <th className="py-6 text-left text-[11px] font-black uppercase tracking-widest">Item Description</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Size</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Color</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Type</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">MRP</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Trade Price</th>
@@ -1169,6 +1196,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                           <p className="font-black text-gray-900">{item.name}</p>
                         </td>
                         <td className="py-6 text-center font-black text-gray-900">{item.size || 'N/A'}</td>
+                        <td className="py-6 text-center font-black text-gray-900">{item.color || 'N/A'}</td>
+                        <td className="py-6 text-center font-black text-gray-900">{item.productType || 'N/A'}</td>
                         <td className="py-6 text-center font-black text-gray-900">{item.quantity}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.mrp}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.tp}</td>
@@ -1179,43 +1208,43 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   </tbody>
                   <tfoot>
                     <tr className="border-t-4 border-black">
-                      <td colSpan={5}></td>
+                      <td colSpan={7}></td>
                       <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Gross Subtotal</td>
                       <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {(viewingInvoice.subtotal || 0).toLocaleString()}</td>
                     </tr>
                     {viewingInvoice.discountTotal > 0 && (
                       <tr>
-                        <td colSpan={5}></td>
+                        <td colSpan={7}></td>
                         <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Total Discount</td>
                         <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingInvoice.discountTotal || 0).toLocaleString()}</td>
                       </tr>
                     )}
                     <tr>
-                      <td colSpan={5}></td>
+                      <td colSpan={7}></td>
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingInvoice.taxRate}%)</td>
                       <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingInvoice.taxTotal || 0).toLocaleString()}</td>
                     </tr>
                     {viewingInvoice.expenseAmount && viewingInvoice.expenseAmount > 0 ? (
                       <tr>
-                        <td colSpan={5}></td>
+                        <td colSpan={7}></td>
                         <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Expenses ({viewingInvoice.expenseType || 'Other'})</td>
                         <td className="py-2 text-right font-black text-gray-900 text-xl">Rs. {viewingInvoice.expenseAmount.toLocaleString()}</td>
                       </tr>
                     ) : null}
                     <tr>
-                      <td colSpan={5}></td>
+                      <td colSpan={7}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
                       <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {(viewingInvoice.total || 0).toLocaleString()}</td>
                     </tr>
                     {(viewingInvoice.paidAmount && viewingInvoice.paidAmount > 0) || viewingInvoice.paymentMethod === 'Cash' ? (
                       <>
                         <tr className="border-t border-gray-100">
-                          <td colSpan={4}></td>
+                          <td colSpan={6}></td>
                           <td className="py-2 text-right font-black text-green-600 uppercase text-[10px] tracking-widest">Amount Paid</td>
                           <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {(viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : (viewingInvoice.paidAmount || 0)).toLocaleString()}</td>
                         </tr>
                         <tr>
-                          <td colSpan={4}></td>
+                          <td colSpan={6}></td>
                           <td className="py-2 text-right font-black text-red-600 uppercase text-[10px] tracking-widest">Remaining Balance</td>
                           <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingInvoice.total - (viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : (viewingInvoice.paidAmount || 0))).toLocaleString()}</td>
                         </tr>

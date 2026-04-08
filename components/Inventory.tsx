@@ -211,6 +211,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
         productId: productId,
         productName: editingProduct.name,
         productSize: editingProduct.size,
+        productColor: editingProduct.color,
+        productType: editingProduct.productType,
         type: 'IN',
         quantity: restockQty,
         date: new Date().toISOString().split('T')[0],
@@ -253,6 +255,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
         productId: editingProduct.id,
         productName: editingProduct.name,
         productSize: editingProduct.size,
+        productColor: editingProduct.color,
+        productType: editingProduct.productType,
         type: 'RETURN',
         quantity: returnQty,
         date: new Date().toISOString().split('T')[0],
@@ -379,6 +383,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       sku: formData.get('sku') as string,
       category: formData.get('category') as string,
       size: formData.get('size') as string || '',
+      color: formData.get('color') as string || '',
+      productType: formData.get('productType') as string || '',
       price: tp, 
       cost: purchasePrice, 
       mrp: mrp, 
@@ -387,8 +393,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       stock: stock,
       minStock: parseInt(formData.get('minStock') as string) || 0,
       description: formData.get('description') as string || '',
-      createdBy: userId,
-      createdByName: userEmail,
+      createdBy: isNewProduct ? userId : editingProduct!.createdBy,
+      createdByName: isNewProduct ? userEmail : editingProduct!.createdByName,
       createdAt: isNewProduct ? new Date().toISOString() : editingProduct!.createdAt
     };
 
@@ -401,6 +407,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
           productId: productData.id,
           productName: productData.name,
           productSize: productData.size,
+          productColor: productData.color,
+          productType: productData.productType,
           type: 'IN',
           quantity: stock,
           date: new Date().toISOString().split('T')[0],
@@ -616,7 +624,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 <tr className="bg-gray-50 text-gray-400 text-[9px] font-black uppercase tracking-[0.2em] border-b border-gray-200">
                   <th className="px-8 py-6">Product</th>
                   <th className="px-6 py-6">SKU</th>
-                  <th className="px-6 py-6">Size</th>
+                  <th className="px-6 py-6">Specs</th>
                   <th className="px-6 py-6 text-center">MRP</th>
                   <th className="px-6 py-6 text-center">Trade Price</th>
                   <th className="px-6 py-6">Stock</th>
@@ -664,13 +672,25 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       </td>
                       <td className="px-6 py-5 text-[11px] font-black text-gray-400">{product.sku || 'N/A'}</td>
                       <td className="px-6 py-5">
-                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
-                          product.size 
-                          ? 'bg-purple-50 border-purple-100 text-purple-600' 
-                          : 'bg-gray-50 border-gray-100 text-gray-400'
-                        }`}>
-                          {product.size || 'N/A'}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border w-fit ${
+                            product.size 
+                            ? 'bg-purple-50 border-purple-100 text-purple-600' 
+                            : 'bg-gray-50 border-gray-100 text-gray-400'
+                          }`}>
+                            Size: {product.size || 'N/A'}
+                          </span>
+                          {product.color && (
+                            <span className="px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border w-fit bg-blue-50 border-blue-100 text-blue-600">
+                              Color: {product.color}
+                            </span>
+                          )}
+                          {product.productType && (
+                            <span className="px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border w-fit bg-emerald-50 border-emerald-100 text-emerald-600">
+                              Type: {product.productType}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-5 text-center">
                          <div className="text-sm font-black text-gray-900">Rs. {(product.mrp || 0).toFixed(2)}</div>
@@ -904,7 +924,16 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                                tx.type === 'RETURN' ? <RefreshCw size={14} /> : 
                                <ArrowDownLeft size={14} />}
                             </div>
-                            <span className="text-sm font-black text-gray-900 print:text-[8px]">{tx.productName}</span>
+                            <div className="flex flex-col">
+                              <span className="text-sm font-black text-gray-900 print:text-[8px]">{tx.productName}</span>
+                              {(tx.productColor || tx.productType) && (
+                                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
+                                  {tx.productColor && `Color: ${tx.productColor}`}
+                                  {tx.productColor && tx.productType && ' | '}
+                                  {tx.productType && `Type: ${tx.productType}`}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-6 py-5 text-center print:px-2 print:py-2">
@@ -1123,52 +1152,76 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   const defaultSku = editingProduct?.sku || adminProduct?.sku || '';
                   const defaultCategory = editingProduct?.category || adminProduct?.category || '';
                   const defaultSize = editingProduct?.size || adminProduct?.size || '';
+                  const defaultColor = editingProduct?.color || adminProduct?.color || '';
+                  const defaultProductType = editingProduct?.productType || adminProduct?.productType || '';
                   const defaultMrp = editingProduct?.mrp || adminProduct?.mrp || '';
                   const defaultTp = editingProduct?.tp || adminProduct?.tp || '';
                   const defaultPp = editingProduct?.purchasePrice || adminProduct?.purchasePrice || '';
                   const defaultMinStock = editingProduct?.minStock || adminProduct?.minStock || 0;
                   const defaultDescription = editingProduct?.description || adminProduct?.description || '';
 
+                  const isReadOnly = role === 'Staff' && !!selectedAdminProductId && !editingProduct;
+
                   return (
                     <>
-                      <div className="md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Product Name</label><input required name="name" defaultValue={defaultName} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">SKU Identity</label><input required name="sku" defaultValue={defaultSku} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label><input required name="category" defaultValue={defaultCategory} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                      <div>
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Size Option</label>
-                        <select 
-                          name="size" 
-                          defaultValue={defaultSize} 
-                          className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-black/5"
-                        >
-                          <option value="">No Size</option>
-                          <option value="Small">Small</option>
-                          <option value="Medium">Medium</option>
-                          <option value="Large">Large</option>
-                          <option value="XL">XL</option>
-                          <option value="XXL">XXL</option>
-                          <option value="3XL">3XL</option>
-                          <option value="4XL">4XL</option>
-                          <option value="5XL">5XL</option>
-                          <option value="Cust">Cust</option>
-                        </select>
+                      <div className="md:col-span-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Product Name</label>
+                        <input required name="name" defaultValue={defaultName} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
                       </div>
-                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label><input required type="number" step="0.01" name="mrp" defaultValue={defaultMrp} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-black" /></div>
-                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label><input required type="number" step="0.01" name="tp" defaultValue={defaultTp} className="w-full px-5 py-4 bg-yellow-50/30 border border-yellow-100 rounded-2xl font-black" /></div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">SKU Identity</label>
+                        <input required name="sku" defaultValue={defaultSku} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label>
+                        <input required name="category" defaultValue={defaultCategory} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Size</label>
+                        <input name="size" defaultValue={defaultSize} readOnly={isReadOnly} placeholder="e.g. XL, 40, 10ml" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Color</label>
+                        <input name="color" defaultValue={defaultColor} readOnly={isReadOnly} placeholder="e.g. Red, Blue" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Type</label>
+                        <input name="productType" defaultValue={defaultProductType} readOnly={isReadOnly} placeholder="e.g. Liquid, Powder" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label>
+                        <input required type="number" step="0.01" name="mrp" defaultValue={defaultMrp} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-black ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label>
+                        <input required type="number" step="0.01" name="tp" defaultValue={defaultTp} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-black ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-yellow-50/30 border-yellow-100'}`} />
+                      </div>
                       {role === 'Admin' ? (
-                        <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label><input required type="number" step="0.01" name="purchasePrice" defaultValue={defaultPp} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" /></div>
+                        <div>
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label>
+                          <input required type="number" step="0.01" name="purchasePrice" defaultValue={defaultPp} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" />
+                        </div>
                       ) : (
                         <input type="hidden" name="purchasePrice" value={defaultPp} />
                       )}
-                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Stock Quantity</label><input required type="number" name="stock" defaultValue={editingProduct?.stock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                      <div><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Alert Level (Min Stock)</label><input required type="number" name="minStock" defaultValue={defaultMinStock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" /></div>
-                      <div className="md:col-span-2"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Description</label><textarea name="description" defaultValue={defaultDescription} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm" rows={2} /></div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Stock Quantity</label>
+                        <input required type="number" name="stock" defaultValue={editingProduct?.stock} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Alert Level (Min Stock)</label>
+                        <input required type="number" name="minStock" defaultValue={defaultMinStock} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Description</label>
+                        <textarea name="description" defaultValue={defaultDescription} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-bold text-sm ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} rows={2} />
+                      </div>
                     </>
                   );
                 })()}
               </div>
-              <button disabled={isSaving} className="w-full py-6 bg-black text-white font-black rounded-3xl uppercase tracking-widest text-[10px] hover:bg-gray-900 transition-all flex items-center justify-center gap-4 disabled:opacity-50">
-                {isSaving ? <Loader2 className="animate-spin text-yellow-500" size={24} /> : <>Commit to Database <Sparkles size={20} className="text-yellow-500" /></>}
+              <button type="submit" disabled={isSaving} className="w-full py-6 bg-black text-white font-black rounded-3xl uppercase tracking-widest text-[10px] hover:bg-gray-900 transition-all flex items-center justify-center gap-4 disabled:opacity-50">
+                {isSaving ? <Loader2 className="animate-spin text-yellow-500" size={24} /> : <>{editingProduct ? 'Update Product' : 'Commit to Database'} <Sparkles size={20} className="text-yellow-500" /></>}
               </button>
             </form>
           </div>

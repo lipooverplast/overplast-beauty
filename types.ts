@@ -17,6 +17,8 @@ export interface Product {
   name: string;
   sku: string;
   size?: string;
+  color?: string;
+  productType?: string;
   category: string;
   price: number;
   cost: number;
@@ -36,6 +38,8 @@ export interface StockTransaction {
   productId: string;
   productName: string;
   productSize?: string;
+  productColor?: string;
+  productType?: string;
   type: 'IN' | 'OUT' | 'RETURN';
   quantity: number;
   date: string;
@@ -62,6 +66,8 @@ export interface InvoiceItem {
   productId: string;
   name: string;
   size?: string;
+  color?: string;
+  productType?: string;
   quantity: number;
   price: number; 
   mrp: number;

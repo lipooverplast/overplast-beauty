@@ -129,6 +129,8 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
         productId: product.id,
         name: product.name,
         size: product.size,
+        color: product.color,
+        productType: product.productType,
         quantity: 1,
         price: tp,
         mrp: mrp,
@@ -659,6 +661,8 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                         <tr>
                           <th className="px-8 py-6">Item Description</th>
                           <th className="px-6 py-6 text-center">Size</th>
+                          <th className="px-6 py-6 text-center">Color</th>
+                          <th className="px-6 py-6 text-center">Type</th>
                           <th className="px-6 py-6 text-center">Quantity</th>
                           <th className="px-6 py-6 text-center">MRP</th>
                           <th className="px-6 py-6 text-center">Trade Price</th>
@@ -681,6 +685,24 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                                 : 'bg-gray-50 border-gray-100 text-gray-400'
                               }`}>
                                 {item.size || 'N/A'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-5 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                                item.color 
+                                ? 'bg-blue-50 border-blue-100 text-blue-600' 
+                                : 'bg-gray-50 border-gray-100 text-gray-400'
+                              }`}>
+                                {item.color || 'N/A'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-5 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                                item.productType 
+                                ? 'bg-emerald-50 border-emerald-100 text-emerald-600' 
+                                : 'bg-gray-50 border-gray-100 text-gray-400'
+                              }`}>
+                                {item.productType || 'N/A'}
                               </span>
                             </td>
                             <td className="px-6 py-5">
@@ -838,6 +860,9 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                   <thead>
                     <tr className="border-b-4 border-black">
                       <th className="py-6 text-left text-[11px] font-black uppercase tracking-widest">Item Description</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Size</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Color</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Type</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">MRP</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Trade Price</th>
@@ -851,6 +876,9 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                         <td className="py-6">
                           <p className="font-black text-gray-900">{item.name}</p>
                         </td>
+                        <td className="py-6 text-center font-black text-gray-900">{item.size || 'N/A'}</td>
+                        <td className="py-6 text-center font-black text-gray-900">{item.color || 'N/A'}</td>
+                        <td className="py-6 text-center font-black text-gray-900">{item.productType || 'N/A'}</td>
                         <td className="py-6 text-center font-black text-gray-900">{item.quantity}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.mrp}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.tp}</td>
@@ -861,24 +889,24 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                   </tbody>
                   <tfoot>
                     <tr className="border-t-4 border-black">
-                      <td colSpan={4}></td>
+                      <td colSpan={6}></td>
                       <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Cycle Gross Subtotal</td>
                       <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {(viewingRecurring.subtotal || 0).toLocaleString()}</td>
                     </tr>
                     {viewingRecurring.discountTotal > 0 && (
                       <tr>
-                        <td colSpan={4}></td>
+                        <td colSpan={6}></td>
                         <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Total Discount</td>
                         <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingRecurring.discountTotal || 0).toLocaleString()}</td>
                       </tr>
                     )}
                     <tr>
-                      <td colSpan={4}></td>
+                      <td colSpan={6}></td>
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingRecurring.taxRate}%)</td>
                       <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingRecurring.taxTotal || 0).toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td colSpan={4}></td>
+                      <td colSpan={6}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Master Amount</td>
                       <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {(viewingRecurring.total || 0).toLocaleString()}</td>
                     </tr>

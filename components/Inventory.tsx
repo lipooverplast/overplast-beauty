@@ -1186,15 +1186,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Color</label>
-                        <input name="color" defaultValue={defaultColor} readOnly={isReadOnly} placeholder="e.g. Red, Blue" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                        <input name="color" defaultValue={defaultColor} placeholder="e.g. Red, Blue" className="w-full px-5 py-4 border rounded-2xl font-bold bg-gray-50 border-gray-200" />
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Type</label>
-                        <input name="productType" defaultValue={defaultProductType} readOnly={isReadOnly} placeholder="e.g. Liquid, Powder" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                        <input name="productType" defaultValue={defaultProductType} placeholder="e.g. Liquid, Powder" className="w-full px-5 py-4 border rounded-2xl font-bold bg-gray-50 border-gray-200" />
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Batch No</label>
-                        <input name="batchNo" defaultValue={defaultBatchNo} readOnly={isReadOnly} placeholder="e.g. B-2024-001" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                        <input name="batchNo" defaultValue={defaultBatchNo} placeholder="e.g. B-2024-001" className="w-full px-5 py-4 border rounded-2xl font-bold bg-gray-50 border-gray-200" />
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label>

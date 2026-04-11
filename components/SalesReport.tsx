@@ -1,15 +1,15 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
-  FileText, Download, Printer, Search, Calendar, 
+  FileText, Printer, Search, Calendar, 
   ArrowUpRight, ArrowDownRight, Package, User, 
-  RefreshCcw, ChevronDown, ChevronUp, Filter, AlertCircle
+  RefreshCcw, ChevronDown, ChevronUp, Filter, AlertCircle, Download, Loader2
 } from 'lucide-react';
 import { Product, Invoice, StockTransaction, UserRole } from '../types';
 import { APP_LOGO_URL, APP_NAME } from '../constants';
+import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import * as XLSX from 'xlsx';
 
 interface SalesReportProps {
   products: Product[];
@@ -25,6 +25,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
   const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [searchSrn, setSearchSrn] = useState('');
+  const [searchBatchNo, setSearchBatchNo] = useState('');
 
   const months = [
     "January", "February", "March", "April", "May", "June",
@@ -86,22 +87,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
   const [searchTotalSalesValue, setSearchTotalSalesValue] = useState('');
   const [searchClosingStockUnit, setSearchClosingStockUnit] = useState('');
   const [searchClosingStockValue, setSearchClosingStockValue] = useState('');
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-
-  const topScrollRef = useRef<HTMLDivElement>(null);
-  const tableScrollRef = useRef<HTMLDivElement>(null);
-
-  const handleTopScroll = () => {
-    if (topScrollRef.current && tableScrollRef.current) {
-      tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
-    }
-  };
-
-  const handleTableScroll = () => {
-    if (topScrollRef.current && tableScrollRef.current) {
-      topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
-    }
-  };
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   const sizes = useMemo(() => ['All', ...new Set(products.map(p => p.size).filter(Boolean))], [products]);
   const categories = useMemo(() => ['All', ...new Set(products.map(p => p.category).filter(Boolean))], [products]);
@@ -231,6 +217,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
         srn: index + 1,
         id: product.id,
         name: product.name,
+        batchNo: product.batchNo || '-',
         size: product.size || '-',
         category: product.category,
         mrp: product.mrp,
@@ -260,6 +247,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
 
       const matchesSrn = String(item.srn).includes(searchSrn);
       const matchesProduct = item.name.toLowerCase().includes(searchProduct.toLowerCase());
+      const matchesBatchNo = item.batchNo.toLowerCase().includes(searchBatchNo.toLowerCase());
       const matchesCategory = searchCategory === 'All' || item.category === searchCategory;
       const matchesSize = searchSize === 'All' || item.size === searchSize;
       const matchesMrp = String(item.mrp).includes(searchMrp);
@@ -282,7 +270,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
       const matchesClosingStockUnit = String(item.closingStockUnit).includes(searchClosingStockUnit);
       const matchesClosingStockValue = String(item.closingStockValue).includes(searchClosingStockValue);
       
-      return matchesSrn && matchesProduct && matchesCategory && matchesSize && matchesMrp && matchesTp && 
+      return matchesSrn && matchesProduct && matchesBatchNo && matchesCategory && matchesSize && matchesMrp && matchesTp && 
              matchesSalesPerson && matchesOpeningStockUnit && matchesOpeningStockValue && 
              matchesReceivedUnit && matchesReceivedValue && matchesTotalStockUnit && 
              matchesReturnUnit && matchesReturnValue && matchesDiscount && 
@@ -291,11 +279,60 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
              matchesTotalSalesUnit && matchesTotalSalesValue && 
              matchesClosingStockUnit && matchesClosingStockValue;
     });
-  }, [products, invoices, transactions, selectedMonth, reportMode, startDate, endDate, searchSrn, searchProduct, searchCategory, searchSize, searchMrp, searchTp, 
+  }, [products, invoices, transactions, selectedMonth, reportMode, startDate, endDate, searchSrn, searchProduct, searchBatchNo, searchCategory, searchSize, searchMrp, searchTp, 
       searchSalesPerson, searchOpeningStockUnit, searchOpeningStockValue, searchReceivedUnit, searchReceivedValue, 
       searchTotalStockUnit, searchReturnUnit, searchReturnValue, searchDiscount, 
       searchCashSalesUnit, searchCashSalesValue, searchCreditSalesUnit, searchCreditSalesValue, 
       searchTotalSalesUnit, searchTotalSalesValue, searchClosingStockUnit, searchClosingStockValue]);
+
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const isSyncingTop = useRef(false);
+  const isSyncingTable = useRef(false);
+
+  const handleTopScroll = () => {
+    if (topScrollRef.current && tableScrollRef.current && !isSyncingTable.current) {
+      isSyncingTop.current = true;
+      tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+      // Reset after a short delay to allow the event to propagate
+      requestAnimationFrame(() => {
+        isSyncingTop.current = false;
+      });
+    }
+  };
+
+  const handleTableScroll = () => {
+    if (topScrollRef.current && tableScrollRef.current && !isSyncingTop.current) {
+      isSyncingTable.current = true;
+      topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+      requestAnimationFrame(() => {
+        isSyncingTable.current = false;
+      });
+    }
+  };
+
+  useEffect(() => {
+    const syncWidths = () => {
+      if (tableScrollRef.current && topScrollRef.current) {
+        const tableWidth = tableScrollRef.current.scrollWidth;
+        const topInnerDiv = topScrollRef.current.firstChild as HTMLDivElement;
+        if (topInnerDiv) {
+          topInnerDiv.style.width = `${tableWidth}px`;
+        }
+      }
+    };
+
+    // Initial sync
+    syncWidths();
+
+    // Create a ResizeObserver to handle dynamic content changes
+    const observer = new ResizeObserver(syncWidths);
+    if (tableScrollRef.current) {
+      observer.observe(tableScrollRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [reportData]);
 
   const reportTitle = reportMode === 'monthly' 
     ? new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }).toUpperCase()
@@ -347,7 +384,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
               background: white !important; 
               border: 1px solid #e5e7eb !important; 
             }
-            .text-white, .text-gray-400, .text-gray-500 {
+            .text-white, .text-gray-400, .text-gray-500, .text-yellow-500 {
               color: black !important;
             }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
@@ -375,29 +412,6 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
     printWindow.document.close();
   };
 
-  const exportToPdf = async () => {
-    setIsGeneratingPdf(true);
-    const element = document.getElementById('sales-report-table');
-    if (!element) return;
-    try {
-      const canvas = await html2canvas(element, { scale: 2 });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('l', 'mm', 'a4'); // Landscape for more columns
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
-      const ratio = pdfWidth / imgWidth;
-      const canvasHeightInPdf = imgHeight * ratio;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, canvasHeightInPdf);
-      const filename = reportMode === 'monthly' ? selectedMonth : `${startDate}_to_${endDate}`;
-      pdf.save(`Sales_Stocks_Report_${filename}.pdf`);
-    } catch (err) {
-      console.error('PDF Error:', err);
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
 
   const exportToExcel = () => {
     const data = reportData.map(item => ({
@@ -431,6 +445,138 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
     XLSX.utils.book_append_sheet(workbook, worksheet, "Sales & Stocks");
     const filename = reportMode === 'monthly' ? selectedMonth : `${startDate}_to_${endDate}`;
     XLSX.writeFile(workbook, `Sales_Stocks_Report_${filename}.xlsx`);
+  };
+
+  const downloadPDF = async () => {
+    const element = document.getElementById('sales-report-content');
+    if (!element) return;
+
+    setIsGeneratingPDF(true);
+
+    try {
+      // Create a clone to manipulate for better PDF rendering
+      const clone = element.cloneNode(true) as HTMLElement;
+      
+      // Force white background and black text for the PDF for maximum clarity
+      clone.style.backgroundColor = 'white';
+      clone.style.color = 'black';
+      clone.style.position = 'absolute';
+      clone.style.left = '-9999px';
+      clone.style.top = '0';
+      clone.style.display = 'block';
+      
+      // Remove no-print elements from clone
+      const noPrintElements = clone.querySelectorAll('.no-print');
+      noPrintElements.forEach(el => el.remove());
+
+      // Show hidden print elements
+      const printOnlyElements = clone.querySelectorAll('.hidden.print\\:block');
+      printOnlyElements.forEach(el => {
+        (el as HTMLElement).classList.remove('hidden');
+        (el as HTMLElement).style.display = 'block';
+      });
+
+      // Fix all children colors and styles in the clone
+      const allElements = clone.querySelectorAll('*');
+      allElements.forEach((el) => {
+        const htmlEl = el as HTMLElement;
+        
+        // Remove sticky positioning which breaks html2canvas
+        const style = window.getComputedStyle(htmlEl);
+        if (style.position === 'sticky') {
+          htmlEl.style.position = 'static';
+        }
+
+        // Force black text and transparent/white backgrounds
+        htmlEl.style.setProperty('color', 'black', 'important');
+        htmlEl.style.setProperty('background-color', 'transparent', 'important');
+        htmlEl.style.setProperty('border-color', '#333333', 'important');
+        
+        // Ensure fonts are visible
+        htmlEl.style.opacity = '1';
+        htmlEl.style.visibility = 'visible';
+      });
+
+      // Specific fix for table headers which were appearing blank
+      const headers = clone.querySelectorAll('th');
+      headers.forEach(th => {
+        th.style.setProperty('color', 'black', 'important');
+        th.style.setProperty('background-color', '#f3f4f6', 'important'); // Light gray for headers
+        th.style.setProperty('font-weight', '900', 'important');
+      });
+
+      // Ensure table is fully expanded and headers are visible
+      const table = clone.querySelector('table');
+      if (table) {
+        // Force a very wide width to ensure no cutting
+        const tableWidth = 2800; 
+        clone.style.width = `${tableWidth}px`;
+        table.style.width = `${tableWidth}px`;
+        table.style.minWidth = `${tableWidth}px`;
+        table.style.tableLayout = 'fixed';
+        
+        // Remove filter row from PDF
+        const filterRow = table.querySelector('tr.print\\:hidden');
+        if (filterRow) filterRow.remove();
+      }
+
+      // Remove top scrollbar clone
+      const topScroll = clone.querySelector('.sticky.top-0');
+      if (topScroll) topScroll.remove();
+
+      document.body.appendChild(clone);
+
+      const canvas = await html2canvas(clone, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 3000,
+        onclone: (clonedDoc) => {
+          // Final check on the cloned document inside html2canvas
+          const clonedElement = clonedDoc.getElementById('sales-report-content');
+          if (clonedElement) {
+            clonedElement.style.display = 'block';
+          }
+        }
+      });
+
+      document.body.removeChild(clone);
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.9);
+      
+      const pdf = new jsPDF({
+        orientation: 'l',
+        unit: 'mm',
+        format: 'a3'
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      // Add first page
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+      heightLeft -= pdfHeight;
+
+      // Add subsequent pages if content is longer than one page
+      while (heightLeft > 0) {
+        pdf.addPage();
+        position -= pdfHeight;
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      pdf.save(`Sales_Report_${reportTitle}.pdf`);
+    } catch (err) {
+      console.error("PDF Generation Error:", err);
+      alert("Failed to generate PDF. Please try again.");
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   return (
@@ -550,6 +696,13 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
 
         <div className="flex items-center gap-2 w-full md:w-auto">
           <button 
+            onClick={downloadPDF}
+            disabled={isGeneratingPDF}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase hover:bg-red-700 shadow-lg transition-all disabled:opacity-50"
+          >
+            {isGeneratingPDF ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} PDF
+          </button>
+          <button 
             onClick={handlePrint}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-gray-800 border border-gray-700 rounded-xl font-black text-[10px] uppercase text-white hover:bg-gray-700 transition-all"
           >
@@ -560,13 +713,6 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase hover:bg-emerald-700 shadow-lg transition-all"
           >
             <FileText size={16} /> Excel
-          </button>
-          <button 
-            onClick={exportToPdf}
-            disabled={isGeneratingPdf}
-            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-yellow-600 text-black rounded-xl font-black text-[10px] uppercase hover:bg-yellow-500 shadow-lg transition-all disabled:opacity-50"
-          >
-            {isGeneratingPdf ? <RefreshCcw size={16} className="animate-spin" /> : <Download size={16} />} PDF
           </button>
         </div>
       </div>
@@ -608,9 +754,9 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
         <div 
           ref={topScrollRef}
           onScroll={handleTopScroll}
-          className="overflow-x-auto scrollbar-thin scrollbar-thumb-yellow-600 scrollbar-track-gray-900 mx-4 mt-4 print:hidden"
+          className="overflow-x-auto scrollbar-thin scrollbar-thumb-yellow-600 scrollbar-track-gray-900 mx-4 mt-4 print:hidden sticky top-0 z-50 bg-black/80 backdrop-blur-sm py-1 rounded-full border border-gray-800"
         >
-          <div style={{ width: '2400px', height: '1px' }}></div>
+          <div style={{ height: '1px' }}></div>
         </div>
 
         <div 
@@ -623,6 +769,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
               <tr className="bg-gray-900 border-b border-gray-800 print:bg-gray-100 print:border-gray-300">
                 <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">SRN</th>
                 <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 min-w-[200px] print:text-black print:p-1 print:border-gray-300">PRODUCTS</th>
+                <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">BATCH NO</th>
                 <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-center print:text-black print:p-1 print:border-gray-300">SIZE</th>
                 <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-right print:text-black print:p-1 print:border-gray-300">MRP</th>
                 <th rowSpan={3} className="p-4 text-[10px] font-black text-yellow-500 uppercase tracking-widest border-r border-gray-800 text-right print:text-black print:p-1 print:border-gray-300">TP</th>
@@ -674,6 +821,15 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                     value={searchProduct}
                     onChange={(e) => setSearchProduct(e.target.value)}
                     className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500"
+                  />
+                </th>
+                <th className="p-2 border-r border-gray-800">
+                  <input 
+                    type="text" 
+                    placeholder="Filter..."
+                    value={searchBatchNo}
+                    onChange={(e) => setSearchBatchNo(e.target.value)}
+                    className="w-full px-2 py-1 text-[10px] font-bold bg-gray-900 text-white border-none rounded focus:ring-1 focus:ring-yellow-500 text-center"
                   />
                 </th>
                 <th className="p-2 border-r border-gray-800">
@@ -873,6 +1029,9 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
                   <td className="p-4 text-xs font-black text-gray-500 text-center border-r border-gray-800">{item.srn}</td>
                   <td className="p-4 text-xs font-black text-white border-r border-gray-800">
                     {item.name}
+                  </td>
+                  <td className="p-4 text-xs font-black text-gray-400 text-center border-r border-gray-800">
+                    {item.batchNo}
                   </td>
                   <td className="p-4 text-xs font-bold text-gray-400 text-center border-r border-gray-800">
                     <span className="px-3 py-1 bg-gray-800 text-yellow-500 rounded-full text-[10px] font-black uppercase tracking-widest">

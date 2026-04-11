@@ -382,6 +382,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       name: formData.get('name') as string,
       sku: formData.get('sku') as string,
       category: formData.get('category') as string,
+      batchNo: formData.get('batchNo') as string || '',
       size: formData.get('size') as string || '',
       color: formData.get('color') as string || '',
       productType: formData.get('productType') as string || '',
@@ -625,6 +626,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   <th className="px-8 py-6">Product</th>
                   <th className="px-6 py-6">SKU</th>
                   <th className="px-6 py-6">Specs</th>
+                  <th className="px-6 py-6 text-center">Batch No</th>
                   <th className="px-6 py-6 text-center">MRP</th>
                   <th className="px-6 py-6 text-center">Trade Price</th>
                   <th className="px-6 py-6">Stock</th>
@@ -692,6 +694,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                           )}
                         </div>
                       </td>
+                      <td className="px-6 py-5 text-center text-[11px] font-black text-gray-500">{product.batchNo || 'N/A'}</td>
                       <td className="px-6 py-5 text-center">
                          <div className="text-sm font-black text-gray-900">Rs. {(product.mrp || 0).toFixed(2)}</div>
                          {role === 'Admin' && <div className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">PP: Rs. {(product.purchasePrice || 0).toFixed(2)}</div>}
@@ -1154,6 +1157,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   const defaultSize = editingProduct?.size || adminProduct?.size || '';
                   const defaultColor = editingProduct?.color || adminProduct?.color || '';
                   const defaultProductType = editingProduct?.productType || adminProduct?.productType || '';
+                  const defaultBatchNo = editingProduct?.batchNo || adminProduct?.batchNo || '';
                   const defaultMrp = editingProduct?.mrp || adminProduct?.mrp || '';
                   const defaultTp = editingProduct?.tp || adminProduct?.tp || '';
                   const defaultPp = editingProduct?.purchasePrice || adminProduct?.purchasePrice || '';
@@ -1187,6 +1191,10 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Type</label>
                         <input name="productType" defaultValue={defaultProductType} readOnly={isReadOnly} placeholder="e.g. Liquid, Powder" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Batch No</label>
+                        <input name="batchNo" defaultValue={defaultBatchNo} readOnly={isReadOnly} placeholder="e.g. B-2024-001" className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">MRP Price (Rs.)</label>

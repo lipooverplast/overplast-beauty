@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS public.products (
   min_stock INTEGER DEFAULT 0,
   color TEXT,
   product_type TEXT,
+  batch_no TEXT,
   description TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -164,6 +165,7 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS size TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS color TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS product_type TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS batch_no TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS price NUMERIC DEFAULT 0;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS cost NUMERIC DEFAULT 0;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS mrp NUMERIC DEFAULT 0;

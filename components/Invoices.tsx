@@ -149,6 +149,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         size: product.size,
         color: product.color,
         productType: product.productType,
+        batchNo: product.batchNo,
         quantity: 1,
         price: tp,
         mrp: mrp,
@@ -199,6 +200,10 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
               newItems.push({
                 productId: product.id,
                 name: product.name,
+                size: product.size,
+                color: product.color,
+                productType: product.productType,
+                batchNo: product.batchNo,
                 quantity: item.quantity || 1,
                 price: product.tp,
                 mrp: product.mrp,
@@ -952,6 +957,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <th className="px-6 py-6 text-center">Size</th>
                       <th className="px-6 py-6 text-center">Color</th>
                       <th className="px-6 py-6 text-center">Type</th>
+                      <th className="px-6 py-6 text-center">Batch No</th>
                       <th className="px-6 py-6 text-center">MRP</th>
                       <th className="px-6 py-6 text-center">Trade Price</th>
                       <th className="px-6 py-6 text-center">Disc (%)</th>
@@ -992,6 +998,15 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                             : 'bg-gray-50 border-gray-100 text-gray-400'
                           }`}>
                             {item.productType || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
+                            item.batchNo 
+                            ? 'bg-orange-50 border-orange-100 text-orange-600' 
+                            : 'bg-gray-50 border-gray-100 text-gray-400'
+                          }`}>
+                            {item.batchNo || 'N/A'}
                           </span>
                         </td>
                         <td className="px-6 py-5 text-center text-xs font-bold text-gray-400 line-through">Rs. {item.mrp}</td>
@@ -1182,6 +1197,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Size</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Color</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Type</th>
+                      <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Batch No</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Quantity</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">MRP</th>
                       <th className="py-6 text-center text-[11px] font-black uppercase tracking-widest">Trade Price</th>
@@ -1198,6 +1214,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         <td className="py-6 text-center font-black text-gray-900">{item.size || 'N/A'}</td>
                         <td className="py-6 text-center font-black text-gray-900">{item.color || 'N/A'}</td>
                         <td className="py-6 text-center font-black text-gray-900">{item.productType || 'N/A'}</td>
+                        <td className="py-6 text-center font-black text-gray-900">{item.batchNo || 'N/A'}</td>
                         <td className="py-6 text-center font-black text-gray-900">{item.quantity}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.mrp}</td>
                         <td className="py-6 text-center font-black text-gray-900">Rs. {item.tp}</td>

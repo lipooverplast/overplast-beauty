@@ -218,6 +218,7 @@ export const db = {
             size: p.size || '',
             color: p.color || '',
             productType: p.product_type || '',
+            batchNo: p.batch_no || '',
             createdBy: p.user_id || 'admin',
             createdByName: createdByName,
             createdAt: p.created_at
@@ -291,6 +292,7 @@ export const db = {
           min_stock: Number(p.minStock) || 0,
           color: p.color || '',
           product_type: p.productType || '',
+          batch_no: p.batchNo || '',
           description: p.description || '',
           size: p.size || ''
         };

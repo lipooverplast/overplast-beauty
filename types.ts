@@ -20,6 +20,7 @@ export interface Product {
   color?: string;
   productType?: string;
   category: string;
+  batchNo?: string;
   price: number;
   cost: number;
   mrp: number;
@@ -68,6 +69,7 @@ export interface InvoiceItem {
   size?: string;
   color?: string;
   productType?: string;
+  batchNo?: string;
   quantity: number;
   price: number; 
   mrp: number;

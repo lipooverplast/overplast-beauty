@@ -161,13 +161,24 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       (p as any).user_email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
     );
     
-    if (filtered.length === 0 && safeProducts.length > 0) {
-      console.warn("Inventory: No admin products found after filtering. Total products:", safeProducts.length);
-      // Fallback: if no admin products found, show all products to avoid empty dropdown
-      return safeProducts;
-    }
+    const source = filtered.length === 0 && safeProducts.length > 0 ? safeProducts : filtered;
     
-    return filtered;
+    // Remove duplicates by Name+Size+Color+Type to ensure unique catalog entries
+    const uniqueMap = new Map();
+    source.forEach(p => {
+      // Create a unique key based on product identity (ignoring SKU and trimming)
+      const name = (p.name || '').trim().toLowerCase();
+      const size = (p.size || '').trim().toLowerCase();
+      const color = (p.color || '').trim().toLowerCase();
+      const type = (p.productType || '').trim().toLowerCase();
+      
+      const key = `${name}|${size}|${color}|${type}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, p);
+      }
+    });
+    
+    return Array.from(uniqueMap.values());
   }, [safeProducts]);
 
   const filteredTransactions = useMemo(() => {
@@ -1130,14 +1141,19 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                     <select 
                       value={selectedAdminProductId}
                       onChange={handleAdminProductSelect}
+                      required={role === 'Staff'}
                       className="w-full px-5 py-4 bg-yellow-50 border border-yellow-100 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10"
                     >
-                      <option value="">-- Create New Custom Product --</option>
-                      {adminProducts.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} {p.size ? `(${p.size})` : ''} - Rs. {p.tp} (MRP: {p.mrp})
-                        </option>
-                      ))}
+                      {role === 'Admin' && <option value="">-- Create New Custom Product --</option>}
+                      {role === 'Staff' && <option value="">-- Select Product from Catalog --</option>}
+                      {adminProducts.map(p => {
+                        const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                        return (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {details ? `(${details})` : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                     {adminProducts.length === 0 && (
                       <p className="mt-2 text-[10px] text-red-500 font-bold italic">
@@ -1164,7 +1180,11 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   const defaultMinStock = editingProduct?.minStock || adminProduct?.minStock || 0;
                   const defaultDescription = editingProduct?.description || adminProduct?.description || '';
 
-                  const isReadOnly = role === 'Staff' && !!selectedAdminProductId && !editingProduct;
+                  const isReadOnly = role === 'Staff';
+                  const isStaffEditing = role === 'Staff' && !!editingProduct;
+                  
+                  // For staff, we only allow editing Color, Type, Batch No, and Stock Quantity
+                  // Everything else is read-only if they are staff
 
                   return (
                     <>

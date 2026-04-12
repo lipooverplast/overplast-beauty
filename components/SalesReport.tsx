@@ -128,23 +128,47 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
       monthlyTransactions = filteredTransactions.filter(t => t.date >= startDate && t.date <= endDate);
     }
 
-    return products.map((product, index) => {
-      const productInvoices = monthlyInvoices.filter(inv => inv.items.some(i => i.productId === product.id));
+    // Group products by name and size to avoid duplicates in the report
+    const groupedProductsMap = new Map<string, { name: string, size: string, ids: string[], originalProducts: Product[] }>();
+    
+    products.forEach(p => {
+      const key = `${p.name.trim().toLowerCase()}|${(p.size || '').trim().toLowerCase()}`;
+      if (!groupedProductsMap.has(key)) {
+        groupedProductsMap.set(key, { 
+          name: p.name, 
+          size: p.size || '-', 
+          ids: [p.id],
+          originalProducts: [p]
+        });
+      } else {
+        const group = groupedProductsMap.get(key)!;
+        group.ids.push(p.id);
+        group.originalProducts.push(p);
+      }
+    });
+
+    const uniqueGroups = Array.from(groupedProductsMap.values());
+
+    return uniqueGroups.map((group, index) => {
+      const productInvoices = monthlyInvoices.filter(inv => inv.items.some(i => group.ids.includes(i.productId)));
       
-      // Get TP from invoice if available, else use product default
-      let displayTp = product.tp;
+      // Use the first product in the group as the base for static details
+      const baseProduct = group.originalProducts[0];
+      
+      // Get TP from invoice if available, else use base product default
+      let displayTp = baseProduct.tp;
       if (productInvoices.length > 0) {
-        const firstItem = productInvoices[0].items.find(i => i.productId === product.id);
+        const firstItem = productInvoices[0].items.find(i => group.ids.includes(i.productId));
         if (firstItem) displayTp = firstItem.tp;
       }
 
-      // Calculate Opening Stock
+      // Calculate Opening Stock (Aggregated for all IDs in the group)
       let openingStockUnit = 0;
       
       if (isStaff) {
         // For staff, opening stock is the sum of THEIR transactions before the range start
         const transactionsBeforeRange = filteredTransactions.filter(t => 
-          t.productId === product.id && 
+          group.ids.includes(t.productId) && 
           t.date < rangeStart
         );
         
@@ -154,24 +178,25 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
         
         openingStockUnit = inBefore - outBefore - returnBefore;
       } else {
-        // For admin, opening stock is global: current stock minus all transactions after range start
-        const transactionsAfterStart = transactions.filter(t => t.productId === product.id && t.date >= rangeStart);
+        // For admin, opening stock is global: sum of current stocks minus all transactions after range start
+        const totalCurrentStock = group.originalProducts.reduce((sum, p) => sum + p.stock, 0);
+        const transactionsAfterStart = transactions.filter(t => group.ids.includes(t.productId) && t.date >= rangeStart);
         const inAfterStart = transactionsAfterStart.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
         const outAfterStart = transactionsAfterStart.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
         const returnAfterStart = transactionsAfterStart.filter(t => t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
         
-        openingStockUnit = product.stock - inAfterStart + outAfterStart + returnAfterStart;
+        openingStockUnit = totalCurrentStock - inAfterStart + outAfterStart + returnAfterStart;
       }
 
       const openingStockValue = openingStockUnit * displayTp;
 
-      // Monthly activity
-      const receivedUnit = monthlyTransactions.filter(t => t.productId === product.id && t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
+      // Monthly activity (Aggregated)
+      const receivedUnit = monthlyTransactions.filter(t => group.ids.includes(t.productId) && t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
       const receivedValue = receivedUnit * displayTp;
 
       const totalStockUnit = openingStockUnit + receivedUnit;
 
-      const returnUnit = monthlyTransactions.filter(t => t.productId === product.id && t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
+      const returnUnit = monthlyTransactions.filter(t => group.ids.includes(t.productId) && t.type === 'RETURN').reduce((sum, t) => sum + t.quantity, 0);
       const returnValue = returnUnit * displayTp;
 
       let discount = 0;
@@ -182,25 +207,26 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
       const salesMap = new Map<string, number>();
 
       productInvoices.forEach(inv => {
-        const item = inv.items.find(i => i.productId === product.id);
-        if (!item) return;
+        const matchingItems = inv.items.filter(i => group.ids.includes(i.productId));
         
-        // Calculate item-level discount amount
-        const itemGross = item.tp * item.quantity;
-        const itemDiscountAmount = itemGross - item.total;
-        discount += itemDiscountAmount;
-        
-        if (inv.paymentMethod === 'Cash') {
-          cashSalesUnit += item.quantity;
-          cashSalesValue += item.total;
-        } else {
-          creditSalesUnit += item.quantity;
-          creditSalesValue += item.total;
-        }
+        matchingItems.forEach(item => {
+          // Calculate item-level discount amount
+          const itemGross = item.tp * item.quantity;
+          const itemDiscountAmount = itemGross - item.total;
+          discount += itemDiscountAmount;
+          
+          if (inv.paymentMethod === 'Cash') {
+            cashSalesUnit += item.quantity;
+            cashSalesValue += item.total;
+          } else {
+            creditSalesUnit += item.quantity;
+            creditSalesValue += item.total;
+          }
 
-        const creator = inv.createdByName || 'Admin';
-        const displayName = inv.salesPerson ? `${inv.salesPerson} (${creator})` : creator;
-        salesMap.set(displayName, (salesMap.get(displayName) || 0) + item.quantity);
+          const creator = inv.createdByName || 'Admin';
+          const displayName = inv.salesPerson ? `${inv.salesPerson} (${creator})` : creator;
+          salesMap.set(displayName, (salesMap.get(displayName) || 0) + item.quantity);
+        });
       });
 
       const totalSalesUnit = cashSalesUnit + creditSalesUnit;
@@ -213,14 +239,17 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
         .map(([name, qty]) => `${name} (${qty})`)
         .join(', ') || '-';
 
+      // Join batch numbers if they are different
+      const batchNos = Array.from(new Set(group.originalProducts.map(p => p.batchNo).filter(Boolean))).join(', ') || '-';
+
       return {
         srn: index + 1,
-        id: product.id,
-        name: product.name,
-        batchNo: product.batchNo || '-',
-        size: product.size || '-',
-        category: product.category,
-        mrp: product.mrp,
+        id: baseProduct.id, // Use the first ID as a reference
+        name: group.name,
+        batchNo: batchNos,
+        size: group.size,
+        category: baseProduct.category,
+        mrp: baseProduct.mrp,
         tp: displayTp,
         salesPersons,
         openingStockUnit,

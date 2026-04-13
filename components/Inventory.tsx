@@ -10,6 +10,7 @@ import { db } from '../db';
 import { ADMIN_EMAIL } from '../constants';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import * as XLSX from 'xlsx';
 
 interface InventoryProps {
   products: Product[];
@@ -531,6 +532,39 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     }
   };
 
+  const exportToExcel = () => {
+    const data = filteredProducts.map((p, index) => ({
+      'SRN': index + 1,
+      'Product Name': p.name,
+      'SKU': p.sku || '-',
+      'Category': p.category || '-',
+      'Size': p.size || '-',
+      'Color': p.color || '-',
+      'Type': p.productType || '-',
+      'Batch No': p.batchNo || '-',
+      'MRP': p.mrp || 0,
+      'Trade Price': p.tp || 0,
+      'Purchase Price': p.purchasePrice || 0,
+      'Current Stock': p.stock || 0,
+      'Min Stock': p.minStock || 0,
+      'Status': (p.stock || 0) <= (p.minStock || 0) ? 'Low Stock' : 'In Stock'
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory Assets");
+
+    // Auto-size columns
+    if (data.length > 0) {
+      const maxWidths = Object.keys(data[0]).map(key => {
+        return Math.max(...data.map(row => String((row as any)[key]).length), key.length) + 2;
+      });
+      worksheet['!cols'] = maxWidths.map(w => ({ wch: w }));
+    }
+
+    XLSX.writeFile(workbook, `Overplast_Inventory_Assets_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500 w-full pb-20">
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-white p-8 rounded-[3rem] border border-gray-200 shadow-sm no-print">
@@ -627,6 +661,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 </select>
                 <Activity className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none" size={16} />
               </div>
+
+              <button 
+                onClick={exportToExcel}
+                className="flex items-center gap-2 px-6 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest transition-all shadow-lg"
+                title="Download Excel"
+              >
+                <Download size={16} />
+                Excel
+              </button>
             </div>
           </div>
 

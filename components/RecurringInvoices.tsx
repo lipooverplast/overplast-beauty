@@ -67,8 +67,22 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
   const [idToDelete, setIdToDelete] = useState<string | null>(null);
 
   const filteredProducts = React.useMemo(() => {
-    if (role === 'Admin') return products;
-    return products.filter(p => p.createdBy === userId);
+    const source = role === 'Admin' ? products : products.filter(p => p.createdBy === userId);
+    
+    // Deduplicate products by Name+Size+Color+Type to ensure unique catalog entries
+    const uniqueMap = new Map();
+    source.forEach(p => {
+      const name = (p.name || '').trim().toLowerCase();
+      const size = (p.size || '').trim().toLowerCase();
+      const color = (p.color || '').trim().toLowerCase();
+      const type = (p.productType || '').trim().toLowerCase();
+      
+      const key = `${name}|${size}|${color}|${type}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, p);
+      }
+    });
+    return Array.from(uniqueMap.values()) as Product[];
   }, [products, role, userId]);
 
   useEffect(() => {
@@ -649,7 +663,14 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                           p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
                           p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
                         )
-                        .map(p => <option key={p.id} value={p.id}>{p.name} {p.size ? `(${p.size})` : ''} (Rs. {p.tp})</option>)}
+                        .map(p => {
+                        const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                        return (
+                          <option key={p.id} value={p.id} className="bg-white text-gray-900">
+                            {p.name} {details ? `(${details})` : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                 </div>

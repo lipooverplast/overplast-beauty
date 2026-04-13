@@ -85,8 +85,23 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
   const filteredProducts = React.useMemo(() => {
-    // For debugging: show ALL products in the invoice selection to ensure visibility
-    return products;
+    // Deduplicate products by Name+Size+Color+Type to ensure unique catalog entries
+    const uniqueMap = new Map();
+    products.forEach(p => {
+      const name = (p.name || '').trim().toLowerCase();
+      const size = (p.size || '').trim().toLowerCase();
+      const color = (p.color || '').trim().toLowerCase();
+      const type = (p.productType || '').trim().toLowerCase();
+      
+      const key = `${name}|${size}|${color}|${type}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, p);
+      } else {
+        // If duplicate found, we could potentially sum stock here if needed, 
+        // but for now we follow the Inventory Vault logic of picking the first one.
+      }
+    });
+    return Array.from(uniqueMap.values()) as Product[];
   }, [products]);
 
   useEffect(() => {
@@ -902,11 +917,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
                         p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
                       )
-                      .map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} {p.size ? `(${p.size})` : ''} - Rs. {p.tp}
-                        </option>
-                      ))}
+                      .map(p => {
+                        const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                        return (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {details ? `(${details})` : ''}
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
                 <div>

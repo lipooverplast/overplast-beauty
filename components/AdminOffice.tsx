@@ -26,8 +26,8 @@ import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from '../constants';
 import { geminiService } from '../geminiService';
 
 const AdminLogo = () => (
-  <div className="flex items-center gap-4">
-    <div className="w-24 h-24 flex items-center justify-center p-2">
+  <div className="flex items-center gap-6">
+    <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center p-3 shadow-lg border border-gray-100">
       <img 
         src={APP_LOGO_URL} 
         alt={APP_NAME} 
@@ -39,14 +39,14 @@ const AdminLogo = () => (
       />
     </div>
     <div className="flex flex-col">
-        <h1 className="text-3xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST</h1>
-        <p className="font-beauty text-xl text-gray-800 italic -mt-1 leading-none">Beauty</p>
-        <p className="text-[7px] font-black text-yellow-600 uppercase tracking-widest mt-1">Cloud Base Management System</p>
-        <div className="mt-2 space-y-0.5 border-t border-gray-100 pt-1">
-          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
-          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">Ph: +92 301 844 4449</p>
-          <p className="text-[7px] font-bold text-gray-400 lowercase tracking-tight">Email: care@overplast.org</p>
-          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">NTN/GST: 2521812-3</p>
+        <h1 className="text-4xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST</h1>
+        <p className="font-beauty text-2xl text-gray-800 italic mt-1 leading-none">Beauty</p>
+        <p className="text-[10px] font-black text-yellow-600 uppercase tracking-widest mt-2">Cloud Base Management System</p>
+        <div className="mt-3 space-y-1 border-t border-gray-100 pt-2">
+          <p className="text-[11px] font-bold text-gray-600 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
+          <p className="text-[11px] font-bold text-gray-600 uppercase tracking-tight">Ph: +92 301 844 4449</p>
+          <p className="text-[11px] font-bold text-gray-600 lowercase tracking-tight">Email: care@overplast.org</p>
+          <p className="text-[11px] font-bold text-gray-600 uppercase tracking-tight">NTN/GST: 2521812-3</p>
         </div>
     </div>
   </div>

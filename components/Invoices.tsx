@@ -14,8 +14,8 @@ import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from '../constants';
 import { geminiService } from '../geminiService';
 
 const InvoiceLogo = () => (
-  <div className="flex items-center gap-4">
-    <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center p-2 shadow-lg border border-gray-100">
+  <div className="flex items-center gap-6">
+    <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center p-3 shadow-lg border border-gray-100">
       <img 
         src={APP_LOGO_URL} 
         alt={APP_NAME} 
@@ -27,14 +27,14 @@ const InvoiceLogo = () => (
       />
     </div>
     <div className="flex flex-col">
-        <h1 className="text-3xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST</h1>
-        <p className="font-beauty text-xl text-gray-800 italic -mt-1 leading-none">Beauty</p>
-        <p className="text-[7px] font-black text-yellow-600 uppercase tracking-widest mt-1">Cloud Base Management System</p>
-        <div className="mt-2 space-y-0.5 border-t border-gray-100 pt-1">
-          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
-          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">Ph: +92 301 844 4449</p>
-          <p className="text-[7px] font-bold text-gray-400 lowercase tracking-tight">Email: care@overplast.org</p>
-          <p className="text-[7px] font-bold text-gray-400 uppercase tracking-tight">NTN/GST: 2521812-3</p>
+        <h1 className="text-4xl font-black tracking-tighter text-gray-900 leading-none uppercase">OVERPLAST</h1>
+        <p className="font-beauty text-2xl text-gray-800 italic mt-1 leading-none">Beauty</p>
+        <p className="text-[10px] font-black text-yellow-600 uppercase tracking-widest mt-2">Cloud Base Management System</p>
+        <div className="mt-3 space-y-1 border-t border-gray-100 pt-2">
+          <p className="text-[11px] font-bold text-gray-600 uppercase tracking-tight">341-F, Johar Town, Lahore, PK</p>
+          <p className="text-[11px] font-bold text-gray-600 uppercase tracking-tight">Ph: +92 301 844 4449</p>
+          <p className="text-[11px] font-bold text-gray-600 lowercase tracking-tight">Email: care@overplast.org</p>
+          <p className="text-[11px] font-bold text-gray-600 uppercase tracking-tight">NTN/GST: 2521812-3</p>
         </div>
     </div>
   </div>
@@ -585,26 +585,27 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         compress: true
       });
       
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const pdfWidth = pdf.internal.pageSize.getWidth() - 20; // 10mm margin on each side
+      const pdfHeight = pdf.internal.pageSize.getHeight() - 20; // 10mm margin on top/bottom
       
       const imgWidth = pdfWidth;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      // Add first page
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-      heightLeft -= pdfHeight;
-
-      // Add subsequent pages if content is long
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-        heightLeft -= pdfHeight;
+      let displayWidth = imgWidth;
+      let displayHeight = imgHeight;
+      
+      // Force single page scaling
+      if (displayHeight > pdfHeight) {
+        const scale = pdfHeight / displayHeight;
+        displayHeight = pdfHeight;
+        displayWidth = displayWidth * scale;
       }
+      
+      // Center the image on the page (including the 10mm offset)
+      const xOffset = 10 + (pdfWidth - displayWidth) / 2;
+      const yOffset = 10 + (pdfHeight - displayHeight) / 2;
+
+      pdf.addImage(imgData, 'PNG', xOffset, yOffset, displayWidth, displayHeight, undefined, 'FAST');
 
       pdf.save(`Overplast_Invoice_${viewingInvoice.invoiceNumber}.pdf`);
     } catch (err) {
@@ -639,19 +640,36 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
           <title>Print Invoice - ${viewingInvoice?.invoiceNumber || 'Invoice'}</title>
           ${styles}
           <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
+            
             body { 
               background: white !important; 
-              padding: 40px !important; 
+              padding: 20px !important; 
               margin: 0 !important;
               color: black !important;
+              font-family: 'Inter', sans-serif !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .font-beauty {
+              font-family: 'Playfair Display', serif !important;
             }
             #printable-invoice-area { 
               display: block !important; 
               width: 100% !important; 
               visibility: visible !important;
+              max-width: 1000px;
+              margin: 0 auto;
             }
             .no-print { display: none !important; }
-            @page { margin: 10mm; size: auto; }
+            @page { 
+              margin: 10mm; 
+              size: portrait; 
+            }
+            table { page-break-inside: auto; }
+            tr { page-break-inside: avoid; page-break-after: auto; }
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
           </style>
         </head>
         <body>

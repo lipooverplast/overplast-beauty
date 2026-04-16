@@ -1214,8 +1214,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   <div>
                     <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-4">Payment Mode</h4>
                     <div className="flex justify-end items-center">
-                       <div className="px-10 py-5 border-4 border-black inline-block bg-white shadow-sm">
-                          <span className="text-3xl font-black uppercase tracking-tighter text-black">
+                       <div className="px-6 py-2 border-2 border-black inline-block bg-white shadow-sm">
+                          <span className="text-xl font-black uppercase tracking-tighter text-black">
                             {viewingInvoice.paymentMethod || 'Cash'}
                           </span>
                        </div>
@@ -1287,7 +1287,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     <tr>
                       <td colSpan={7}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
-                      <td className="py-4 text-right font-black text-black text-4xl tracking-tighter">Rs. {(viewingInvoice.total || 0).toLocaleString()}</td>
+                      <td className="py-4 text-right font-black text-black text-2xl tracking-tighter">Rs. {(viewingInvoice.total || 0).toLocaleString()}</td>
                     </tr>
                     {(viewingInvoice.paidAmount && viewingInvoice.paidAmount > 0) || viewingInvoice.paymentMethod === 'Cash' ? (
                       <>

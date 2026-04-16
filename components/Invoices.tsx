@@ -10,6 +10,7 @@ import { Invoice, Product, Client, InvoiceItem, UserRole, Payment, StockTransact
 import { db } from '../db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import * as XLSX from 'xlsx';
 import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from '../constants';
 import { geminiService } from '../geminiService';
 
@@ -78,6 +79,36 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentNote, setPaymentNote] = useState('');
   const [searchSalesPerson, setSearchSalesPerson] = useState('');
+
+  const exportToExcel = () => {
+    const dataToExport = filteredInvoices.map(inv => {
+      const pMethod = inv.paymentMethod || 'Cash';
+      const isReturned = inv.status === 'Returned';
+      const paid = isReturned ? 0 : (pMethod === 'Cash' ? inv.total : (inv.paidAmount || 0));
+      const balance = isReturned ? 0 : (inv.total - paid);
+      
+      return {
+        'Statement #': inv.invoiceNumber,
+        'Date': inv.date,
+        'Client': inv.clientName,
+        'Sales Person': inv.salesPerson || inv.createdByName || 'N/A',
+        'Method': pMethod,
+        'Subtotal': inv.subtotal,
+        'Discount': inv.discountTotal,
+        'Tax': inv.taxTotal,
+        'Expenses': inv.expenseAmount || 0,
+        'Total': inv.total,
+        'Paid': paid,
+        'Balance': balance,
+        'Status': inv.status
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Billing Ledger");
+    XLSX.writeFile(wb, `Overplast_Billing_Ledger_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
   
   // Deletion State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -702,6 +733,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
           <p className="text-sm text-gray-500 font-medium italic">History of {invoices.length} business statements.</p>
         </div>
         <div className="flex items-center gap-4">
+          <button 
+            onClick={exportToExcel}
+            className="p-4 bg-green-50 text-green-700 rounded-2xl border border-green-100 font-black uppercase tracking-widest text-[10px] flex items-center gap-2 hover:bg-green-100 transition-all shadow-sm group"
+            title="Download Excel"
+          >
+            <Download size={18} className="text-green-600 group-hover:scale-110 transition-transform" />
+            Excel
+          </button>
           <div className="relative group">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-black transition-colors" />
             <input 
@@ -1094,7 +1133,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 </div>
                 <div>
                    <p className="text-[8px] sm:text-[10px] font-black text-yellow-600 uppercase tracking-widest mb-1">Final Amount</p>
-                   <p className="text-xl sm:text-4xl font-black text-black tracking-tighter">Rs. {(grandTotal || 0).toLocaleString()}</p>
+                   <p className="text-xl sm:text-4xl font-black text-black tracking-tighter">Rs. {(grandTotal - (expenseAmount || 0)).toLocaleString()}</p>
                 </div>
               </div>
               <button 
@@ -1277,31 +1316,31 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingInvoice.taxRate}%)</td>
                       <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingInvoice.taxTotal || 0).toLocaleString()}</td>
                     </tr>
-                    {viewingInvoice.expenseAmount && viewingInvoice.expenseAmount > 0 ? (
-                      <tr>
-                        <td colSpan={7}></td>
-                        <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Expenses ({viewingInvoice.expenseType || 'Other'})</td>
-                        <td className="py-2 text-right font-black text-gray-900 text-xl">Rs. {viewingInvoice.expenseAmount.toLocaleString()}</td>
-                      </tr>
-                    ) : null}
                     <tr>
                       <td colSpan={7}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
-                      <td className="py-4 text-right font-black text-black text-2xl tracking-tighter">Rs. {(viewingInvoice.total || 0).toLocaleString()}</td>
+                      <td className="py-4 text-right font-black text-black text-2xl tracking-tighter">Rs. {(viewingInvoice.total - (viewingInvoice.expenseAmount || 0)).toLocaleString()}</td>
                     </tr>
                     {(viewingInvoice.paidAmount && viewingInvoice.paidAmount > 0) || viewingInvoice.paymentMethod === 'Cash' ? (
                       <>
                         <tr className="border-t border-gray-100">
                           <td colSpan={6}></td>
                           <td className="py-2 text-right font-black text-green-600 uppercase text-[10px] tracking-widest">Amount Paid</td>
-                          <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {(viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : (viewingInvoice.paidAmount || 0)).toLocaleString()}</td>
+                          <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {Math.max(0, (viewingInvoice.paymentMethod === 'Cash' ? (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) : ((viewingInvoice.paidAmount || 0) - (viewingInvoice.expenseAmount || 0)))).toLocaleString()}</td>
                         </tr>
                         <tr>
                           <td colSpan={6}></td>
                           <td className="py-2 text-right font-black text-red-600 uppercase text-[10px] tracking-widest">Remaining Balance</td>
-                          <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingInvoice.total - (viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : (viewingInvoice.paidAmount || 0))).toLocaleString()}</td>
+                          <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {Math.max(0, (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) - Math.max(0, (viewingInvoice.paymentMethod === 'Cash' ? (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) : ((viewingInvoice.paidAmount || 0) - (viewingInvoice.expenseAmount || 0))))).toLocaleString()}</td>
                         </tr>
                       </>
+                    ) : null}
+                    {viewingInvoice.expenseAmount && viewingInvoice.expenseAmount > 0 ? (
+                      <tr>
+                        <td colSpan={7}></td>
+                        <td className="py-4 text-right font-black text-orange-600 uppercase text-[10px] tracking-widest pt-10">Expenses ({viewingInvoice.expenseType || 'Other'})</td>
+                        <td className="py-4 text-right font-black text-orange-600 text-xl pt-10">Rs. {viewingInvoice.expenseAmount.toLocaleString()}</td>
+                      </tr>
                     ) : null}
                   </tfoot>
                 </table>

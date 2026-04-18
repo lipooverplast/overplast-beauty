@@ -117,9 +117,33 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
   const filteredProducts = React.useMemo(() => {
+    const isUserAdmin = role?.toLowerCase() === 'admin';
+    
+    // Staff should see products they have registered PLUS products registered by the Admin
+    const userProducts = isUserAdmin ? products : products.filter(p => {
+      const isOwner = p.createdBy === userId;
+      
+      const adminEmail = ADMIN_EMAIL.trim().toLowerCase();
+      const pEmail = (p.user_email || '').trim().toLowerCase();
+      const pName = (p.createdByName || '').trim().toLowerCase();
+      
+      const isSystemAdmin = !p.createdBy || 
+                            p.createdBy === 'admin' || 
+                            p.createdBy === 'Admin' ||
+                            pEmail === adminEmail ||
+                            pName === adminEmail ||
+                            !p.user_email; // Fallback for old/system products
+                            
+      return isOwner || isSystemAdmin;
+    });
+
+    // Final fallback: if after filtering as staff we have nothing but the system has products,
+    // it's better to show everything than nothing (to prevent "blank dropdown" bug)
+    const source = (role !== 'Admin' && userProducts.length === 0 && products.length > 0) ? products : userProducts;
+    
     // Deduplicate products by Name+Size+Color+Type to ensure unique catalog entries
     const uniqueMap = new Map();
-    products.forEach(p => {
+    source.forEach(p => {
       const name = (p.name || '').trim().toLowerCase();
       const size = (p.size || '').trim().toLowerCase();
       const color = (p.color || '').trim().toLowerCase();
@@ -128,13 +152,10 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       const key = `${name}|${size}|${color}|${type}`;
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, p);
-      } else {
-        // If duplicate found, we could potentially sum stock here if needed, 
-        // but for now we follow the Inventory Vault logic of picking the first one.
       }
     });
     return Array.from(uniqueMap.values()) as Product[];
-  }, [products]);
+  }, [products, role, userId]);
 
   useEffect(() => {
     if (initialClientId) {

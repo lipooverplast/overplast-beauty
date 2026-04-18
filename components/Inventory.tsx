@@ -135,15 +135,8 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     }
 
     // Staff Logic:
-    // Show products registered by this staff member AND products created by Admin
-    const staffProducts = safeProducts.filter(p => 
-      p.createdBy === userId || 
-      (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
-      !p.createdBy ||
-      p.createdBy === 'admin' ||
-      p.createdBy === 'Admin' ||
-      p.user_email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
-    );
+    // Show ONLY products registered by this specific staff member
+    const staffProducts = safeProducts.filter(p => p.createdBy === userId);
     
     return staffProducts.filter(p => {
       const matchesSearch = (p.name || '').toLowerCase().includes(nameSearch) || (p.sku || '').toLowerCase().includes(nameSearch);

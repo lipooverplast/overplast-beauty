@@ -197,7 +197,7 @@ export const db = {
           // If it's an admin product but email is missing, fill it in for the UI
           // An admin product is one where user_id is null OR user_email matches ADMIN_EMAIL OR user_email is null
           const isSystemProduct = !p.user_id || 
-                                  (p.user_email && p.user_email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
+                                  (p.user_email && p.user_email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase().trim()) || 
                                   !p.user_email;
           
           const createdByName = p.user_email || (isSystemProduct ? ADMIN_EMAIL : '');

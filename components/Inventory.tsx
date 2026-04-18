@@ -1237,7 +1237,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">SKU Identity</label>
-                        <input required name="sku" defaultValue={defaultSku} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-bold ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-gray-50 border-gray-200'}`} />
+                        <input required name="sku" defaultValue={defaultSku} className="w-full px-5 py-4 border rounded-2xl font-bold bg-gray-50 border-gray-200" />
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Category</label>

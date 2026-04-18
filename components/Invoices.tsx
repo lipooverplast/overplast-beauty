@@ -70,6 +70,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit'>('Cash');
   const [activeAssetId, setActiveAssetId] = useState(''); 
   const [assetSearchTerm, setAssetSearchTerm] = useState('');
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
@@ -156,6 +157,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     if (isModalOpen) {
       setActiveAssetId('');
       setAssetSearchTerm('');
+      setClientSearchTerm('');
     }
   }, [isModalOpen]);
 
@@ -928,6 +930,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     setEditingInvoiceId(null);
                     setSelectedItems([]);
                     setSelectedClientId('');
+                    setClientSearchTerm('');
                     setSalesPerson('');
                     setExpenseType('');
                     setExpenseAmount(0);
@@ -939,10 +942,29 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
             <div className="flex-1 overflow-y-auto p-4 sm:p-10 space-y-6 sm:space-y-10">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
                 <div className="md:col-span-2">
-                  <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Client Portfolio</label>
-                  <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-bold outline-none">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Client Portfolio</label>
+                    <div className="relative group">
+                      <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+                      <input 
+                        type="text" 
+                        placeholder="Search Client..." 
+                        value={clientSearchTerm} 
+                        onChange={e => setClientSearchTerm(e.target.value)}
+                        className="pl-6 pr-2 py-1.5 bg-white border border-gray-200 rounded-lg text-[10px] font-bold outline-none focus:ring-2 focus:ring-indigo-400 w-32 transition-all"
+                      />
+                    </div>
+                  </div>
+                  <select 
+                    value={selectedClientId} 
+                    onChange={e => setSelectedClientId(e.target.value)} 
+                    className="w-full p-5 bg-gray-50 border border-gray-200 rounded-[1.25rem] font-bold outline-none"
+                  >
                     <option value="">Select Target Client...</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {clients
+                      .filter(c => c.name.toLowerCase().includes(clientSearchTerm.toLowerCase()))
+                      .map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                    }
                   </select>
                 </div>
                 <div>

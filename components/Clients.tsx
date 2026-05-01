@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
-import { Plus, Search, User, Mail, Phone, MapPin, MoreVertical, X, Loader2, AlertCircle, Trash2, AlertTriangle, Edit, Eye } from 'lucide-react';
+import { Plus, Search, User, Mail, Phone, MapPin, MoreVertical, X, Loader2, AlertCircle, Trash2, AlertTriangle, Edit, Eye, Download } from 'lucide-react';
 import { Client, UserRole, Invoice } from '../types';
 import { db } from '../db';
+import * as XLSX from 'xlsx';
 
 interface ClientsProps {
   clients: Client[];
@@ -19,11 +20,55 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
   const [viewingClientDetails, setViewingClientDetails] = useState<Client | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Filter clients based on search term
+  const filteredClients = React.useMemo(() => {
+    if (!searchTerm) return clients;
+    const term = searchTerm.toLowerCase();
+    return clients.filter(c => 
+      (c.name || '').toLowerCase().includes(term) ||
+      (c.phone || '').toLowerCase().includes(term) ||
+      (c.doctorName || '').toLowerCase().includes(term) ||
+      (c.hospitalName || '').toLowerCase().includes(term)
+    );
+  }, [clients, searchTerm]);
   
   // Delete State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleExportExcel = () => {
+    const data = filteredClients.map((c, index) => ({
+      'SRN': index + 1,
+      'Client Name': c.name,
+      'Email': c.email || '-',
+      'Phone': c.phone || '-',
+      'Hospital Name': c.hospitalName || '-',
+      'Doctor Name': c.doctorName || '-',
+      'Address': c.address || '-',
+      'Notes': c.notes || '-'
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Clients Portfolio");
+
+    // Auto-size columns
+    if (data.length > 0) {
+      const colWidths = Object.keys(data[0]).map(key => {
+        const maxLength = Math.max(
+          key.length,
+          ...data.map(row => String(row[key as keyof typeof row]).length)
+        );
+        return { wch: maxLength + 2 };
+      });
+      worksheet['!cols'] = colWidths;
+    }
+
+    XLSX.writeFile(workbook, `Overplast_Clients_Portfolio_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -67,10 +112,6 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
   const triggerDeleteConfirm = (e: React.MouseEvent, client: Client) => {
     e.preventDefault();
     e.stopPropagation();
-    if (role !== 'Admin') {
-      alert("Unauthorized: Only Administrators can remove clients.");
-      return;
-    }
     setClientToDelete(client);
     setShowDeleteConfirm(true);
   };
@@ -95,22 +136,50 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 w-full overflow-hidden">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-black text-gray-900 uppercase tracking-tighter">Clients Portfolio</h2>
-          <p className="text-sm text-gray-600 font-medium italic">Your professional network and customer base.</p>
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-white p-8 rounded-[3rem] border border-gray-200 shadow-sm">
+        <div className="flex items-center gap-6">
+          <div className="p-4 bg-blue-600 text-white rounded-2xl shadow-lg">
+             <User size={32} />
+          </div>
+          <div>
+            <h2 className="text-3xl font-black text-gray-900 uppercase tracking-tighter leading-none mb-1">Clients Portfolio</h2>
+            <p className="text-sm text-gray-500 font-medium italic">Managing {clients.length} professional network relationships.</p>
+          </div>
         </div>
-        <button 
-          onClick={() => { setEditingClient(null); setError(null); setIsModalOpen(true); }}
-          className="flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-lg w-full sm:w-auto"
-        >
-          <Plus size={20} strokeWidth={3} />
-          Add New Member
-        </button>
+        
+        <div className="flex flex-col md:flex-row items-center gap-4 flex-1 max-w-4xl">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input 
+              type="text"
+              placeholder="Search by name, phone, or hospital..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-14 pr-6 py-4 bg-gray-50 border border-gray-200 rounded-[1.5rem] text-sm font-bold focus:ring-4 focus:ring-blue-50 outline-none transition-all"
+            />
+          </div>
+          
+          <button 
+            onClick={handleExportExcel}
+            className="flex items-center gap-2 px-6 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest transition-all shadow-lg"
+            title="Download Excel"
+          >
+            <Download size={16} />
+            Excel
+          </button>
+          
+          <button 
+            onClick={() => { setEditingClient(null); setError(null); setIsModalOpen(true); }}
+            className="flex items-center justify-center gap-3 bg-black hover:bg-gray-800 text-white px-10 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl w-full md:w-auto whitespace-nowrap"
+          >
+            <Plus size={20} strokeWidth={3} className="text-blue-500" />
+            Add New Member
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-        {clients && clients.length > 0 ? clients.map(client => {
+        {filteredClients && filteredClients.length > 0 ? filteredClients.map(client => {
           const isDeleting = deletingId === client.id;
           const clientInvoices = invoices.filter(inv => inv.clientId === client.id);
           const totalOutstanding = clientInvoices.reduce((sum, inv) => {
@@ -145,16 +214,14 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
                      >
                        <Edit size={20} />
                      </button>
-                     {role === 'Admin' && (
-                        <button 
-                          onClick={(e) => triggerDeleteConfirm(e, client)}
-                          disabled={isDeleting}
-                          className="p-3 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
-                          title="Delete Client"
-                        >
-                          {isDeleting ? <Loader2 size={20} className="animate-spin" /> : <Trash2 size={20} />}
-                        </button>
-                     )}
+                     <button 
+                       onClick={(e) => triggerDeleteConfirm(e, client)}
+                       disabled={isDeleting}
+                       className="p-3 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                       title="Delete Client"
+                     >
+                       {isDeleting ? <Loader2 size={20} className="animate-spin" /> : <Trash2 size={20} />}
+                     </button>
                   </div>
                 </div>
               </div>

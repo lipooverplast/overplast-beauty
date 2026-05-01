@@ -33,6 +33,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
   const [restockQty, setRestockQty] = useState(0);
+  const [catalogSearchTerm, setCatalogSearchTerm] = useState('');
   const [returnQty, setReturnQty] = useState(0);
   const [returnNote, setReturnNote] = useState('');
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -106,9 +107,14 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       
       const flow = txs.reduce((acc, tx) => {
         if (tx.date.startsWith(historyMonth)) {
-          if (tx.type === 'IN') acc.in += tx.quantity;
-          if (tx.type === 'OUT') acc.out += tx.quantity;
-          if (tx.type === 'RETURN') acc.out += tx.quantity; // Returns now decrease stock (outgoing return)
+          // Counter Logic: 
+          // For Admin, show global flow totals
+          // For Staff, show personal flow totals
+          if (role === 'Admin' || tx.createdBy === userId) {
+            if (tx.type === 'IN') acc.in += tx.quantity;
+            if (tx.type === 'OUT') acc.out += tx.quantity;
+            if (tx.type === 'RETURN') acc.out += tx.quantity;
+          }
         }
         return acc;
       }, { in: 0, out: 0 });
@@ -118,10 +124,6 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       console.error("Failed to fetch transactions", err);
     }
   };
-
-  useEffect(() => {
-    fetchTransactions();
-  }, [products, historyMonth, viewMode]);
 
   const filteredProducts = useMemo(() => {
     const nameSearch = searchTerm.toLowerCase();
@@ -145,6 +147,14 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     });
   }, [safeProducts, searchTerm, selectedCategory, role, userId]);
 
+  const totalCurrentStock = useMemo(() => {
+    return filteredProducts.reduce((sum, p) => sum + (p.stock || 0), 0);
+  }, [filteredProducts]);
+
+  useEffect(() => {
+    fetchTransactions();
+  }, [products, historyMonth, viewMode]);
+
   const adminProducts = useMemo(() => {
     // Filter to show ONLY products created by Admin
     // This allows staff to see the "master catalog" of products registered by the admin
@@ -157,9 +167,18 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     
     const source = filtered.length === 0 && safeProducts.length > 0 ? safeProducts : filtered;
     
+    // Filter by search term if provided
+    const searchFiltered = catalogSearchTerm 
+      ? source.filter(p => 
+          (p.name || '').toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
+          (p.sku || '').toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
+          (p.category || '').toLowerCase().includes(catalogSearchTerm.toLowerCase())
+        )
+      : source;
+    
     // Remove duplicates by Name+Size+Color+Type to ensure unique catalog entries
     const uniqueMap = new Map();
-    source.forEach(p => {
+    searchFiltered.forEach(p => {
       // Create a unique key based on product identity (ignoring SKU and trimming)
       const name = (p.name || '').trim().toLowerCase();
       const size = (p.size || '').trim().toLowerCase();
@@ -173,7 +192,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     });
     
     return Array.from(uniqueMap.values());
-  }, [safeProducts]);
+  }, [safeProducts, catalogSearchTerm]);
 
   const filteredTransactions = useMemo(() => {
     return allTransactions.filter(tx => {
@@ -594,7 +613,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
           <button onClick={onUpdate} className="p-4 bg-gray-50 text-gray-400 hover:text-black rounded-2xl border border-gray-200 transition-all"><RefreshCw size={20} /></button>
           
           {viewMode === 'inventory' && (
-            <button onClick={() => { setEditingProduct(null); setSelectedAdminProductId(''); setIsModalOpen(true); }} className="flex items-center justify-center gap-3 bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl">
+            <button onClick={() => { setEditingProduct(null); setSelectedAdminProductId(''); setCatalogSearchTerm(''); setIsModalOpen(true); }} className="flex items-center justify-center gap-3 bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl">
               <Plus size={18} strokeWidth={3} className="text-yellow-500" /> Register Stock
             </button>
           )}
@@ -632,7 +651,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2 bg-white px-5 py-3 rounded-2xl border border-gray-200 shadow-sm whitespace-nowrap">
                 <div className="flex flex-col">
-                  <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">In Stock (Total)</span>
+                  <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Available Stock</span>
+                  <div className="flex items-center gap-1.5 text-black">
+                    <Package size={14} strokeWidth={3} className="text-yellow-600" />
+                    <span className="text-xs font-black">{totalCurrentStock}</span>
+                  </div>
+                </div>
+                <div className="w-[1px] h-6 bg-gray-100 mx-2"></div>
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Monthly Inflow</span>
                   <div className="flex items-center gap-1.5 text-green-600">
                     <ArrowUpRight size={14} strokeWidth={3} />
                     <span className="text-xs font-black">{monthlyFlow.in}</span>
@@ -640,7 +667,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 </div>
                 <div className="w-[1px] h-6 bg-gray-100 mx-2"></div>
                 <div className="flex flex-col">
-                  <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Out Stock (Total)</span>
+                  <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest">Monthly Outflow</span>
                   <div className="flex items-center gap-1.5 text-blue-600">
                     <ArrowDownLeft size={14} strokeWidth={3} />
                     <span className="text-xs font-black">{monthlyFlow.out}</span>
@@ -1167,36 +1194,51 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 <div className="w-12 h-12 bg-black text-yellow-500 rounded-2xl flex items-center justify-center"><Package size={24} /></div>
                 <h3 className="text-xl font-black text-gray-900 uppercase tracking-tighter">{editingProduct ? 'Update Stock' : 'Register Stock'}</h3>
               </div>
-              <button onClick={() => { setIsModalOpen(false); setSelectedAdminProductId(''); }} className="p-3 hover:bg-red-50 hover:text-red-600 rounded-2xl"><X size={28} /></button>
+              <button onClick={() => { setIsModalOpen(false); setSelectedAdminProductId(''); setCatalogSearchTerm(''); }} className="p-3 hover:bg-red-50 hover:text-red-600 rounded-2xl"><X size={28} /></button>
             </div>
             <form key={editingProduct?.id || selectedAdminProductId} onSubmit={handleSubmit} className="p-10 space-y-8 max-h-[75vh] overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {!editingProduct && (
-                  <div className="md:col-span-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Select Product from Admin Catalog</label>
-                    <select 
-                      value={selectedAdminProductId}
-                      onChange={handleAdminProductSelect}
-                      required={role === 'Staff'}
-                      className="w-full px-5 py-4 bg-yellow-50 border border-yellow-100 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10"
-                    >
-                      {role === 'Admin' && <option value="">-- Create New Custom Product --</option>}
-                      {role === 'Staff' && <option value="">-- Select Product from Catalog --</option>}
-                      {adminProducts.map(p => {
-                        const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
-                        return (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {details ? `(${details})` : ''}
-                          </option>
-                        );
-                      })}
-                    </select>
+                  <div className="md:col-span-2 space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-end gap-4">
+                      <div className="flex-1 relative">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Search Catalog</label>
+                        <Search className="absolute left-4 bottom-4 text-gray-400" size={16} />
+                        <input 
+                          type="text"
+                          placeholder="Search product name or SKU..."
+                          value={catalogSearchTerm}
+                          onChange={(e) => setCatalogSearchTerm(e.target.value)}
+                          className="w-full pl-11 pr-4 py-3 bg-white border border-gray-200 rounded-xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10 text-sm"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Quick Select Product</label>
+                        <select 
+                          value={selectedAdminProductId}
+                          onChange={handleAdminProductSelect}
+                          required={role === 'Staff'}
+                          className="w-full px-5 py-3 bg-yellow-50 border border-yellow-100 rounded-xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10 text-sm"
+                        >
+                          {role === 'Admin' && <option value="">-- Create New Custom Product --</option>}
+                          {role === 'Staff' && <option value="">-- Select Product from Catalog --</option>}
+                          {adminProducts.map(p => {
+                            const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                            return (
+                              <option key={p.id} value={p.id}>
+                                {p.name} {details ? `(${details})` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    </div>
                     {adminProducts.length === 0 && (
                       <p className="mt-2 text-[10px] text-red-500 font-bold italic">
-                        Admin catalog is currently empty (Total System Assets: {safeProducts.length}). Please add products as Admin first.
+                        {catalogSearchTerm ? "No products match your search." : `Admin catalog is currently empty (Total System Assets: ${safeProducts.length}). Please add products as Admin first.`}
                       </p>
                     )}
-                    <p className="mt-2 text-[10px] text-gray-400 font-bold italic">Selecting an admin product will pre-fill the details below.</p>
+                    <p className="mt-2 text-[10px] text-gray-400 font-bold italic">Search and select an admin product to pre-fill the details below.</p>
                   </div>
                 )}
                 

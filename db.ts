@@ -642,8 +642,19 @@ export const db = {
       localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(filtered));
     }
 
+    // Also delete associated transactions from local storage
+    const localTransactions = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+    if (localTransactions) {
+      const current = JSON.parse(localTransactions);
+      const filtered = current.filter((t: any) => String(t.productId) !== idStr);
+      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(filtered));
+    }
+
     if (isSupabaseConfigured && supabase) {
       try {
+        // Delete associated transactions first
+        await withRetry(() => supabase.from('stock_transactions').delete().eq('product_id', id));
+        // Then delete the product
         const { error } = await withRetry(() => supabase.from('products').delete().eq('id', id));
         if (error) throw error;
       } catch (e: any) {
@@ -786,6 +797,39 @@ export const db = {
       const { error } = await withRetry(() => supabase.from('profiles').update({ status }).eq('id', id));
       if (error) throw error;
     }
+  },
+
+  updateProfileEmail: async (id: string, oldEmail: string, newEmail: string) => {
+    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
+      try {
+        console.log(`Migrating profile ${id} from ${oldEmail} to ${newEmail}`);
+        
+        // 1. Update Profile table
+        await withRetry(() => supabase.from('profiles').update({ email: newEmail }).eq('id', id));
+        
+        // 2. Update Products
+        await withRetry(() => supabase.from('products').update({ user_email: newEmail }).eq('user_email', oldEmail));
+        
+        // 3. Update Invoices
+        await withRetry(() => supabase.from('invoices').update({ user_email: newEmail }).eq('user_email', oldEmail));
+        
+        // 4. Update Recurring Invoices
+        await withRetry(() => supabase.from('recurring_invoices').update({ user_email: newEmail }).eq('user_email', oldEmail));
+        
+        // 5. Update Payments
+        await withRetry(() => supabase.from('payments').update({ user_email: newEmail }).eq('user_email', oldEmail));
+        
+        // 6. Update Stock Transactions
+        await withRetry(() => supabase.from('stock_transactions').update({ user_email: newEmail }).eq('user_email', oldEmail));
+        
+        console.log("Migration completed successfully.");
+        return true;
+      } catch (e) {
+        console.error("Migration failed:", e);
+        throw e;
+      }
+    }
+    return false;
   },
 
   updateProfilePassword: async (id: string, password: string) => {

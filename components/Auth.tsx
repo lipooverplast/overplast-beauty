@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { supabase, clearSupabaseConfig, isSupabaseConfigured } from '../supabaseClient';
 import { db } from '../db';
 import { Mail, Lock, Loader2, Sparkles, ArrowRight, Github, Chrome, AlertCircle, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
-import { APP_LOGO_URL, APP_NAME } from '../constants';
+import { APP_LOGO_URL, APP_NAME, ADMIN_EMAIL } from '../constants';
 
 const AuthLogo = () => (
   <div className="flex flex-col items-center gap-2 mb-6">
@@ -28,7 +28,11 @@ const AuthLogo = () => (
   </div>
 );
 
-const Auth: React.FC = () => {
+interface AuthProps {
+  onDemoLogin?: (email: string, role: 'Admin' | 'Staff') => void;
+}
+
+const Auth: React.FC<AuthProps> = ({ onDemoLogin }) => {
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -37,8 +41,23 @@ const Auth: React.FC = () => {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // If Supabase is NOT configured, allow demo login through the form
     if (!isSupabaseConfigured || !supabase) {
-      setError("Cloud base is not correctly configured. Please link database in Settings first.");
+      const emailLower = email.toLowerCase();
+      
+      // Admin check
+      if (!isSignUp && (emailLower === ADMIN_EMAIL.toLowerCase() || emailLower === 'karachi1@gmail.com') && password === 'admin123') {
+        if (onDemoLogin) onDemoLogin(email, 'Admin');
+        return;
+      }
+      // Staff check
+      if (!isSignUp && (emailLower === 'hh@gmail.com' || emailLower === 'karachi1@gmail.com') && password === 'staff123') {
+        if (onDemoLogin) onDemoLogin(email, 'Staff');
+        return;
+      }
+
+      setError(`Cloud base is not correctly configured. Please link database in Settings first. (Demo logins: ${ADMIN_EMAIL}, karachi1@gmail.com, or hh@gmail.com. Key: admin123 or staff123)`);
       return;
     }
     setLoading(true);
@@ -148,7 +167,7 @@ const Auth: React.FC = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-14 pr-6 py-4 bg-gray-50 border border-gray-200 rounded-[1.25rem] outline-none focus:ring-2 focus:ring-yellow-500 font-bold transition-all"
-                  placeholder="admin@overplast.com"
+                  placeholder={ADMIN_EMAIL}
                 />
               </div>
             </div>
@@ -219,6 +238,15 @@ const Auth: React.FC = () => {
           </form>
 
           <div className="mt-8 grid grid-cols-1 gap-3">
+            {!isSupabaseConfigured && (
+              <button 
+                onClick={() => onDemoLogin && onDemoLogin(ADMIN_EMAIL, 'Admin')}
+                className="w-full py-5 bg-gray-50 text-gray-900 rounded-[1.5rem] font-black uppercase tracking-[0.2em] hover:bg-gray-100 transition-all border border-gray-100 flex items-center justify-center gap-3"
+              >
+                <Sparkles size={18} className="text-yellow-500" />
+                Demo Admin Access
+              </button>
+            )}
              <button 
               onClick={clearSupabaseConfig}
               className="w-full py-4 bg-white border border-gray-200 text-gray-400 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-gray-50 transition-all"

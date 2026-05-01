@@ -169,7 +169,7 @@ const AdminOffice: React.FC<{
         inv.date.startsWith(selectedMonth) && inv.status !== 'Returned'
       );
       
-      const rev = monthlyInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+      const rev = monthlyInvoices.reduce((sum, inv) => sum + ((inv.subtotal || 0) - (inv.discountTotal || 0) + (inv.taxTotal || 0)), 0);
       const tax = monthlyInvoices.reduce((sum, inv) => sum + (inv.taxTotal || 0), 0);
       const invoiceExpenses = monthlyInvoices.reduce((sum, inv) => sum + (inv.expenseAmount || 0), 0);
       
@@ -184,8 +184,9 @@ const AdminOffice: React.FC<{
       const breakdown = Object.entries(expenseMap).map(([type, amount]) => ({ type, amount }));
 
       const pending = monthlyInvoices.reduce((sum, inv) => {
-        const paid = inv.paymentMethod === 'Cash' ? inv.total : (inv.paidAmount || 0);
-        return sum + (inv.total - paid);
+        const netTotal = (inv.subtotal || 0) - (inv.discountTotal || 0) + (inv.taxTotal || 0);
+        const paid = inv.paymentMethod === 'Cash' ? netTotal : Math.min(inv.paidAmount || 0, netTotal);
+        return sum + Math.max(0, netTotal - paid);
       }, 0);
       
       let cost = 0;
@@ -228,7 +229,7 @@ const AdminOffice: React.FC<{
       const date = inv.date;
       const day = inv.date.split('-')[2];
       if (!dailyData[date]) dailyData[date] = { date, day, revenue: 0, debit: 0, profit: 0, invoices: [] };
-      dailyData[date].revenue += inv.total;
+      dailyData[date].revenue += (inv.subtotal - (inv.discountTotal || 0) + (inv.taxTotal || 0));
       dailyData[date].invoices.push(inv);
       
       let invCost = 0;
@@ -237,12 +238,13 @@ const AdminOffice: React.FC<{
         const purchasePrice = product?.purchasePrice || 0;
         invCost += purchasePrice * (item.quantity || 0); 
       });
-      const invProfit = (inv.total - inv.taxTotal) - invCost - (inv.expenseAmount || 0);
+      const invRevenue = (inv.subtotal - (inv.discountTotal || 0) + (inv.taxTotal || 0));
+      const invProfit = (invRevenue - inv.taxTotal) - invCost - (inv.expenseAmount || 0);
       const invDebit = invCost + inv.taxTotal + (inv.expenseAmount || 0);
       
       if (!dailyData[date]) dailyData[date] = { date, day, revenue: 0, debit: 0, profit: 0, invoices: [] };
-      dailyData[date].revenue += inv.total;
-      dailyData[date].invoices.push({ ...inv, profit: invProfit });
+      dailyData[date].revenue = (dailyData[date].revenue || 0); // Already added above
+      dailyData[date].invoices[dailyData[date].invoices.length - 1] = { ...inv, profit: invProfit };
       
       dailyData[date].debit += invDebit;
       dailyData[date].profit += invProfit;

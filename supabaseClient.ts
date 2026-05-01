@@ -5,6 +5,9 @@ const storedUrl = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem('SUP
 const storedKey = import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.getItem('SUPABASE_ANON_KEY_OVERRIDE') || '';
 
 const isValidUrl = (url: string) => {
+  if (!url) return false;
+  // If it's just a project ID (lowercase alphanumeric of ~20 chars)
+  if (/^[a-z0-9]{20}$/.test(url)) return true;
   try {
     const u = new URL(url);
     return u.protocol === 'https:' || u.protocol === 'http:';
@@ -17,7 +20,11 @@ let supabaseInstance: any = null;
 
 if (isValidUrl(storedUrl) && storedKey.length > 20) {
   try {
-    supabaseInstance = createClient(storedUrl, storedKey, {
+    const finalUrl = /^[a-z0-9]{20}$/.test(storedUrl) 
+      ? `https://${storedUrl}.supabase.co` 
+      : storedUrl;
+
+    supabaseInstance = createClient(finalUrl, storedKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,

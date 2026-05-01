@@ -67,23 +67,25 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
   const [idToDelete, setIdToDelete] = useState<string | null>(null);
 
   const filteredProducts = React.useMemo(() => {
-    const source = role === 'Admin' ? products : products.filter(p => p.createdBy === userId);
+    // Show all products to all users for recurring cycle creation
+    const source = products;
     
-    // Deduplicate products by Name+Size+Color+Type to ensure unique catalog entries
+    // Deduplicate products by Name+Size+Color+Type+BatchNo
     const uniqueMap = new Map();
     source.forEach(p => {
       const name = (p.name || '').trim().toLowerCase();
       const size = (p.size || '').trim().toLowerCase();
       const color = (p.color || '').trim().toLowerCase();
       const type = (p.productType || '').trim().toLowerCase();
+      const batch = (p.batchNo || '').trim().toLowerCase();
       
-      const key = `${name}|${size}|${color}|${type}`;
+      const key = `${name}|${size}|${color}|${type}|${batch}`;
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, p);
       }
     });
     return Array.from(uniqueMap.values()) as Product[];
-  }, [products, role, userId]);
+  }, [products]);
 
   useEffect(() => {
     fetchRecurring();
@@ -142,9 +144,11 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
       setSelectedItems([...selectedItems, {
         productId: product.id,
         name: product.name,
+        description: product.description,
         size: product.size,
         color: product.color,
         productType: product.productType,
+        batchNo: product.batchNo,
         quantity: 1,
         price: tp,
         mrp: mrp,
@@ -238,16 +242,13 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
   const triggerDeleteConfirm = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (role !== 'Admin') {
-      alert("Unauthorized: Only Administrators can terminate recurring cycles.");
-      return;
-    }
+    // Allow both Admin and Staff to delete
     setIdToDelete(id);
     setShowDeleteConfirm(true);
   };
 
   const performDelete = async () => {
-    if (!idToDelete || role !== 'Admin') return;
+    if (!idToDelete) return;
     const targetId = idToDelete;
     setShowDeleteConfirm(false);
     setIdToDelete(null);
@@ -467,16 +468,14 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                   }`}>
                     {ri.status}
                   </span>
-                  {role === 'Admin' && (
-                    <button 
-                      type="button"
-                      onClick={(e) => triggerDeleteConfirm(e, ri.id)} 
-                      className="p-2 text-gray-300 hover:text-red-600 transition-colors z-[20] relative"
-                      title="Delete Subscription"
-                    >
-                      <Trash2 size={20} />
-                    </button>
-                  )}
+                  <button 
+                    type="button"
+                    onClick={(e) => triggerDeleteConfirm(e, ri.id)} 
+                    className="p-2 text-gray-300 hover:text-red-600 transition-colors z-[20] relative"
+                    title="Delete Subscription"
+                  >
+                    <Trash2 size={20} />
+                  </button>
               </div>
             </div>
 
@@ -664,10 +663,10 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                           p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
                         )
                         .map(p => {
-                        const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                        const details = [p.size, p.color, p.productType, p.batchNo].filter(Boolean).join(', ');
                         return (
                           <option key={p.id} value={p.id} className="bg-white text-gray-900">
-                            {p.name} {details ? `(${details})` : ''}
+                            {p.name} {details ? `(${details})` : ''} — {p.stock} in stock
                           </option>
                         );
                       })}
@@ -684,6 +683,7 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                           <th className="px-6 py-6 text-center">Size</th>
                           <th className="px-6 py-6 text-center">Color</th>
                           <th className="px-6 py-6 text-center">Type</th>
+                          <th className="px-6 py-6 text-center">Batch No</th>
                           <th className="px-6 py-6 text-center">Quantity</th>
                           <th className="px-6 py-6 text-center">MRP</th>
                           <th className="px-6 py-6 text-center">Trade Price</th>
@@ -697,7 +697,8 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                           <tr key={item.productId} className="hover:bg-gray-50/50 transition-colors">
                             <td className="px-8 py-5">
                                <p className="text-sm font-black text-gray-900">{item.name}</p>
-                               <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest italic">Fixed Recurring Item</p>
+                               {item.description && <p className="text-[10px] text-gray-500 italic mt-0.5">{item.description}</p>}
+                               <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest italic mt-1">Fixed Recurring Item</p>
                             </td>
                             <td className="px-6 py-5 text-center">
                               <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
@@ -725,6 +726,9 @@ const RecurringInvoices: React.FC<RecurringInvoicesProps> = ({ products, clients
                               }`}>
                                 {item.productType || 'N/A'}
                               </span>
+                            </td>
+                            <td className="px-6 py-5 text-center text-[10px] font-black text-gray-500">
+                              {item.batchNo || 'N/A'}
                             </td>
                             <td className="px-6 py-5">
                               <div className="flex justify-center">

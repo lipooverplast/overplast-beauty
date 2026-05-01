@@ -82,17 +82,24 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, userId,
     const fetchTransactions = async () => {
       const txs = await db.getStockTransactions(role === 'Admin' ? undefined : userId);
       const currentMonth = new Date().toISOString().slice(0, 7);
-      const inUnits = txs.filter(t => (t.type === 'IN' || t.type === 'RETURN') && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
-      const outUnits = txs.filter(t => t.type === 'OUT' && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
+      
+      // For Admin, show global flow; for Staff, show personal flow
+      const filteredTxs = (role === 'Admin') ? txs : txs.filter(t => t.createdBy === userId);
+      
+      const inUnits = filteredTxs.filter(t => (t.type === 'IN' || t.type === 'RETURN') && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
+      const outUnits = filteredTxs.filter(t => t.type === 'OUT' && t.date.startsWith(currentMonth)).reduce((sum, t) => sum + t.quantity, 0);
       setMonthlyIn(inUnits);
       setMonthlyOut(outUnits);
     };
     fetchTransactions();
   }, [products, invoices, userId, role]);
 
-  const staffProducts = role === 'Admin' ? products : products.filter(p => p.createdBy === userId);
+  // For Admin, summary stats reflect ALL products. For Staff, only their own.
+  const displayProducts = role === 'Admin' ? products : products.filter(p => p.createdBy === userId);
+  const staffProducts = displayProducts; // Legacy name used in some places
+
   const validInvoices = invoices.filter(inv => inv.status !== 'Returned');
-  const totalRevenue = validInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+  const totalRevenue = validInvoices.reduce((sum, inv) => sum + ((inv.subtotal || 0) - (inv.discountTotal || 0) + (inv.taxTotal || 0)), 0);
   const netSales = validInvoices.reduce((sum, inv) => sum + ((inv.subtotal || 0) - (inv.discountTotal || 0)), 0);
   const totalCost = validInvoices.reduce((sum, inv) => {
     return sum + (inv.items || []).reduce((itemSum, item) => {
@@ -102,8 +109,8 @@ const Dashboard: React.FC<DashboardProps> = ({ products, invoices, role, userId,
     }, 0);
   }, 0);
   const estimatedProfit = netSales - totalCost;
-  const lowStockItems = staffProducts.filter(p => p.stock <= p.minStock).length;
-  const inventoryValue = staffProducts.reduce((sum, p) => sum + (p.tp * p.stock), 0);
+  const lowStockItems = displayProducts.filter(p => p.stock <= p.minStock).length;
+  const inventoryValue = displayProducts.reduce((sum, p) => sum + (p.tp * p.stock), 0);
 
   const adminStats = [
     { label: 'Net Asset Value', value: `Rs. ${inventoryValue.toLocaleString()}`, icon: Wallet, color: 'text-indigo-600', bg: 'bg-indigo-50', trend: 'Valuation' },

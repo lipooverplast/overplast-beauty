@@ -66,6 +66,7 @@ export interface Client {
 export interface InvoiceItem {
   productId: string;
   name: string;
+  description?: string;
   size?: string;
   color?: string;
   productType?: string;

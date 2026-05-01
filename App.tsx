@@ -47,6 +47,18 @@ const App: React.FC = () => {
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [dbError, setDbError] = useState<boolean>(false);
   const [preselectedClientId, setPreselectedClientId] = useState<string | null>(null);
+  const [demoSession, setDemoSession] = useState<{ email: string, role: 'Admin' | 'Staff' } | null>(() => {
+    if (isSupabaseConfigured) return null;
+    const stored = localStorage.getItem('DEMO_SESSION');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
 
   useEffect(() => {
     // Global error listener for Supabase refresh token errors and network failures
@@ -87,6 +99,13 @@ const App: React.FC = () => {
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
     if (isSupabaseConfigured && supabase) {
+      const handleAuthChange = (newUser: any) => {
+        setUser((prevUser: any) => {
+          if (prevUser?.id === newUser?.id) return prevUser;
+          return newUser;
+        });
+      };
+
       supabase.auth.getSession().then(({ data: { session }, error }: any) => {
         if (error && (
           error.message.includes('Refresh Token') || 
@@ -106,7 +125,7 @@ const App: React.FC = () => {
             }
           }
         } else {
-          setUser(session?.user ?? null);
+          handleAuthChange(session?.user ?? null);
         }
       }).catch((err: any) => {
         console.error("Auth: Session fetch failed", err);
@@ -124,10 +143,8 @@ const App: React.FC = () => {
         console.log("Auth State Change:", event);
         if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
           setUser(null);
-        } else if (session) {
-          setUser(session.user);
         } else {
-          setUser(null);
+          handleAuthChange(session?.user ?? null);
         }
       });
 
@@ -143,6 +160,45 @@ const App: React.FC = () => {
       };
     }
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      // 1. Immediately clear all possible auth keys from local storage
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.includes('supabase.auth.token') || 
+          key.includes('sb-') || 
+          key.includes('SUPABASE_')
+        )) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+      
+      // 2. Clear session storage too just in case
+      sessionStorage.clear();
+      
+      // 3. Try to inform Supabase but don't wait for it
+      if (supabase) {
+        supabase.auth.signOut().catch(() => {});
+      }
+    } catch (error) {
+      console.error("Logout Pre-cleanup Error:", error);
+    } finally {
+      // 4. Reset local state
+      setUser(null);
+      setProfile(null);
+      setDemoSession(null);
+      localStorage.removeItem('DEMO_SESSION');
+      localStorage.removeItem('DEMO_ADMIN');
+      localStorage.removeItem('DEMO_STAFF');
+      
+      // 5. Hard reload to root to purge all memory state
+      window.location.replace('/');
+    }
+  };
 
   const fetchInitialData = async () => {
     if (user && isSupabaseConfigured) {
@@ -183,11 +239,11 @@ const App: React.FC = () => {
     else setIsLoading(true);
     
     try {
-      const isAdmin = !isSupabaseConfigured || 
-                      currentProfile?.role === 'Admin' || 
-                      currentProfile?.role === 'admin' || 
-                      user?.email === ADMIN_EMAIL;
-      const filterId = isAdmin ? undefined : user?.id;
+      const isAdminMode = demoSession?.role === 'Admin' || 
+                         currentProfile?.role === 'Admin' || 
+                         currentProfile?.role === 'admin' || 
+                         user?.email === ADMIN_EMAIL;
+      const filterId = isAdminMode ? undefined : user?.id;
 
       const [p, c, i, t] = await Promise.all([
         db.getProducts(undefined), // Allow all users to see all products
@@ -218,8 +274,9 @@ const App: React.FC = () => {
     setActiveView('invoices');
   };
 
-  const isAdmin = !isSupabaseConfigured || profile?.role?.toLowerCase() === 'admin' || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const isAdmin = demoSession?.role === 'Admin' || profile?.role?.toLowerCase() === 'admin' || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
   const effectiveRole = isAdmin ? 'Admin' : 'Staff';
+  const effectiveEmail = user?.email || demoSession?.email || 'Guest';
 
   if (profile?.status === 'Suspended') {
     return (
@@ -228,13 +285,22 @@ const App: React.FC = () => {
           <Ban size={48} className="text-red-600 mx-auto mb-6" />
           <h1 className="text-3xl font-black uppercase mb-4">Access Denied</h1>
           <p className="text-gray-500 mb-8">Node has been decommissioned by administrator.</p>
-          <button onClick={() => supabase?.auth.signOut()} className="w-full py-4 bg-black text-white rounded-2xl font-black uppercase text-xs">Disconnect Session</button>
+          <button onClick={handleLogout} className="w-full py-4 bg-black text-white rounded-2xl font-black uppercase text-xs">Disconnect Session</button>
         </div>
       </div>
     );
   }
 
   if (isSupabaseConfigured && !user) return <Auth />;
+  if (!isSupabaseConfigured && !demoSession) {
+    return <Auth 
+      onDemoLogin={(email: string, role: 'Admin' | 'Staff') => {
+        const session = { email, role };
+        setDemoSession(session);
+        localStorage.setItem('DEMO_SESSION', JSON.stringify(session));
+      }} 
+    />;
+  }
 
   if (isLoading || isProfileLoading) {
     return (
@@ -335,10 +401,10 @@ const App: React.FC = () => {
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase text-gray-400 leading-none">{effectiveRole}</p>
-                <p className="text-[11px] font-black truncate text-gray-900">{user?.email}</p>
+                <p className="text-[11px] font-black truncate text-gray-900">{effectiveEmail}</p>
               </div>
             </div>
-            <button onClick={() => supabase?.auth.signOut()} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-red-500 font-bold text-sm hover:bg-red-50 transition-colors"><LogOut size={20} /> Terminate Session</button>
+            <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-red-500 font-bold text-sm hover:bg-red-50 transition-colors"><LogOut size={20} /> Terminate Session</button>
           </div>
         </div>
       </aside>
@@ -361,11 +427,11 @@ const App: React.FC = () => {
             </button>
             <div className="flex items-center gap-3">
                <div className="text-right hidden md:block">
-                 <p className="text-[10px] font-black text-gray-900 uppercase leading-none truncate max-w-[120px] mb-0.5">{user?.email?.split('@')[0]}</p>
+                 <p className="text-[10px] font-black text-gray-900 uppercase leading-none truncate max-w-[120px] mb-0.5">{effectiveEmail.split('@')[0]}</p>
                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-[0.1em]">{effectiveRole}</p>
                </div>
                <div className="w-10 h-10 bg-black border-2 border-white shadow-xl rounded-full flex items-center justify-center overflow-hidden">
-                 <img src={`https://api.dicebear.com/7.x/initials/svg?seed=${user?.email || 'G'}`} alt="avatar" />
+                 <img src={`https://api.dicebear.com/7.x/initials/svg?seed=${effectiveEmail || 'G'}`} alt="avatar" />
                </div>
             </div>
           </div>

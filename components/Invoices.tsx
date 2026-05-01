@@ -98,7 +98,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         'Discount': inv.discountTotal,
         'Tax': inv.taxTotal,
         'Expenses': inv.expenseAmount || 0,
-        'Total': inv.total,
+        'Total': inv.subtotal - (inv.discountTotal || 0) + (inv.taxTotal || 0),
         'Paid': paid,
         'Balance': balance,
         'Status': inv.status
@@ -117,45 +117,27 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
   const filteredProducts = React.useMemo(() => {
-    const isUserAdmin = role?.toLowerCase() === 'admin';
+    // Show all products to all users for billing/statement creation
+    // This ensures staff can invoice any item in the inventory vault
+    const source = products;
     
-    // Staff should see products they have registered PLUS products registered by the Admin
-    const userProducts = isUserAdmin ? products : products.filter(p => {
-      const isOwner = p.createdBy === userId;
-      
-      const adminEmail = ADMIN_EMAIL.trim().toLowerCase();
-      const pEmail = (p.user_email || '').trim().toLowerCase();
-      const pName = (p.createdByName || '').trim().toLowerCase();
-      
-      const isSystemAdmin = !p.createdBy || 
-                            p.createdBy === 'admin' || 
-                            p.createdBy === 'Admin' ||
-                            pEmail === adminEmail ||
-                            pName === adminEmail ||
-                            !p.user_email; // Fallback for old/system products
-                            
-      return isOwner || isSystemAdmin;
-    });
-
-    // Final fallback: if after filtering as staff we have nothing but the system has products,
-    // it's better to show everything than nothing (to prevent "blank dropdown" bug)
-    const source = (role !== 'Admin' && userProducts.length === 0 && products.length > 0) ? products : userProducts;
-    
-    // Deduplicate products by Name+Size+Color+Type to ensure unique catalog entries
+    // Deduplicate products by Name+Size+Color+Type+BatchNo to ensure unique catalog entries
+    // Including BatchNo ensures different batches of the same product can be selected individually
     const uniqueMap = new Map();
     source.forEach(p => {
       const name = (p.name || '').trim().toLowerCase();
       const size = (p.size || '').trim().toLowerCase();
       const color = (p.color || '').trim().toLowerCase();
       const type = (p.productType || '').trim().toLowerCase();
+      const batch = (p.batchNo || '').trim().toLowerCase();
       
-      const key = `${name}|${size}|${color}|${type}`;
+      const key = `${name}|${size}|${color}|${type}|${batch}`;
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, p);
       }
     });
     return Array.from(uniqueMap.values()) as Product[];
-  }, [products, role, userId]);
+  }, [products]);
 
   useEffect(() => {
     if (initialClientId) {
@@ -196,7 +178,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const subtotal = grossSubtotal;
   const discountTotal = totalItemDiscount + globalDiscountAmount;
   const taxTotal = (grossSubtotal - discountTotal) * (taxRate / 100);
-  const grandTotal = grossSubtotal - discountTotal + taxTotal + expenseAmount;
+  const grandTotal = grossSubtotal - discountTotal + taxTotal;
 
   const addItem = (productId: string) => {
     const product = filteredProducts.find(p => p.id === productId);
@@ -215,6 +197,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       setSelectedItems([...selectedItems, {
         productId: product.id,
         name: product.name,
+        description: product.description,
         size: product.size,
         color: product.color,
         productType: product.productType,
@@ -423,10 +406,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const triggerDeleteConfirm = (e: React.MouseEvent, invoice: Invoice) => {
     e.preventDefault();
     e.stopPropagation();
-    if (role !== 'Admin') {
-      alert("Unauthorized: Only Administrators can purge invoice records.");
-      return;
-    }
+    // Allow both Admin and Staff to delete (Staff only sees their own anyway from App.tsx logic)
     setInvoiceToDelete(invoice);
     setShowDeleteConfirm(true);
   };
@@ -802,7 +782,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 const pMethod = inv.paymentMethod || 'Cash';
                 const isReturned = inv.status === 'Returned';
                 const paid = isReturned ? 0 : (pMethod === 'Cash' ? inv.total : (inv.paidAmount || 0));
-                const balance = isReturned ? 0 : (inv.total - paid);
+                const balance = isReturned ? 0 : ((inv.subtotal - (inv.discountTotal || 0) + (inv.taxTotal || 0)) - paid);
                 return (
                   <tr key={inv.id} onClick={() => setViewingInvoice(inv)} className="hover:bg-yellow-50/20 cursor-pointer transition-colors group">
                     <td className="px-6 py-5 font-black text-gray-900">
@@ -822,7 +802,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                          {pMethod}
                       </div>
                     </td>
-                    <td className="px-6 py-5 text-right font-black text-gray-900">Rs. {(inv.total || 0).toLocaleString()}</td>
+                    <td className="px-6 py-5 text-right font-black text-gray-900">Rs. {(inv.subtotal - (inv.discountTotal || 0) + (inv.taxTotal || 0)).toLocaleString()}</td>
                     <td className="px-6 py-5 text-right font-bold text-green-600">Rs. {(paid || 0).toLocaleString()}</td>
                     <td className="px-6 py-5 text-right font-bold text-red-600">Rs. {(balance || 0).toLocaleString()}</td>
                     <td className="px-6 py-5 text-center">
@@ -858,20 +838,18 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         >
                           <Eye size={16} />
                         </button>
-                        {role === 'Admin' && (
-                          <button 
-                            onClick={(e) => triggerDeleteConfirm(e, inv)} 
-                            disabled={isDeleting}
-                            className={`p-2.5 rounded-xl transition-all shadow-sm border ${
-                              isDeleting 
-                              ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
-                              : 'bg-white border-red-100 text-red-500 hover:bg-red-500 hover:text-white'
-                            }`} 
-                            title="Purge Record"
-                          >
-                            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                          </button>
-                        )}
+                        <button 
+                          onClick={(e) => triggerDeleteConfirm(e, inv)} 
+                          disabled={isDeleting}
+                          className={`p-2.5 rounded-xl transition-all shadow-sm border ${
+                            isDeleting 
+                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
+                            : 'bg-white border-red-100 text-red-500 hover:bg-red-500 hover:text-white'
+                          }`} 
+                          title="Purge Record"
+                        >
+                          {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1018,10 +996,10 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                         p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
                       )
                       .map(p => {
-                        const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                        const details = [p.size, p.color, p.productType, p.batchNo].filter(Boolean).join(', ');
                         return (
                           <option key={p.id} value={p.id}>
-                            {p.name} {details ? `(${details})` : ''}
+                            {p.name} {details ? `(${details})` : ''} — {p.stock} in stock
                           </option>
                         );
                       })}
@@ -1089,7 +1067,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <tr key={item.productId}>
                         <td className="px-8 py-5">
                           <p className="font-black text-gray-900">{item.name}</p>
-                          <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold">Ref: {item.productId.slice(-4)}</p>
+                          {item.description && <p className="text-[10px] text-gray-500 italic mt-0.5">{item.description}</p>}
+                          <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mt-1">Ref: {item.productId.slice(-4)}</p>
                         </td>
                         <td className="px-6 py-5 text-center">
                           <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${
@@ -1176,7 +1155,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 </div>
                 <div>
                    <p className="text-[8px] sm:text-[10px] font-black text-yellow-600 uppercase tracking-widest mb-1">Final Amount</p>
-                   <p className="text-xl sm:text-4xl font-black text-black tracking-tighter">Rs. {(grandTotal - (expenseAmount || 0)).toLocaleString()}</p>
+                   <p className="text-xl sm:text-4xl font-black text-black tracking-tighter">Rs. {grandTotal.toLocaleString()}</p>
                 </div>
               </div>
               <button 
@@ -1232,7 +1211,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   <>
                     <button 
                       onClick={() => {
-                        setPaymentAmount(viewingInvoice.total - (viewingInvoice.paidAmount || 0));
+                        setPaymentAmount((viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)) - (viewingInvoice.paidAmount || 0));
                         setIsRecordingPayment(true);
                       }}
                       className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-blue-600 text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-blue-700 shadow-lg transition-all"
@@ -1251,15 +1230,13 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 <button onClick={exportToPdf} disabled={isGeneratingPdf} className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-black text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-gray-900 shadow-lg transition-all">
                   {isGeneratingPdf ? <Loader2 className="animate-spin text-yellow-500" size={14} /> : <Download size={14} />} <span className="hidden xs:inline">PDF</span>
                 </button>
-                {role === 'Admin' && (
-                  <button 
-                    onClick={(e) => triggerDeleteConfirm(e, viewingInvoice)} 
-                    className="p-2 sm:p-3 bg-red-50 text-red-600 rounded-lg sm:rounded-xl hover:bg-red-100 transition-all"
-                    title="Purge Invoice"
-                  >
-                    <Trash2 size={18} className="sm:w-6 sm:h-6" />
-                  </button>
-                )}
+                <button 
+                  onClick={(e) => triggerDeleteConfirm(e, viewingInvoice)} 
+                  className="p-2 sm:p-3 bg-red-50 text-red-600 rounded-lg sm:rounded-xl hover:bg-red-100 transition-all"
+                  title="Purge Invoice"
+                >
+                  <Trash2 size={18} className="sm:w-6 sm:h-6" />
+                </button>
                 <button onClick={() => setViewingInvoice(null)} className="p-3 sm:p-4 bg-gray-100 hover:bg-red-50 hover:text-red-600 rounded-xl sm:rounded-2xl transition-all shadow-sm"><X size={24} className="sm:w-8 sm:h-8" /></button>
               </div>
             </div>
@@ -1362,19 +1339,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     <tr>
                       <td colSpan={7}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
-                      <td className="py-4 text-right font-black text-black text-2xl tracking-tighter">Rs. {(viewingInvoice.total - (viewingInvoice.expenseAmount || 0)).toLocaleString()}</td>
+                      <td className="py-4 text-right font-black text-black text-2xl tracking-tighter">Rs. {(viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)).toLocaleString()}</td>
                     </tr>
                     {(viewingInvoice.paidAmount && viewingInvoice.paidAmount > 0) || viewingInvoice.paymentMethod === 'Cash' ? (
                       <>
                         <tr className="border-t border-gray-100">
                           <td colSpan={6}></td>
                           <td className="py-2 text-right font-black text-green-600 uppercase text-[10px] tracking-widest">Amount Paid</td>
-                          <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {Math.max(0, (viewingInvoice.paymentMethod === 'Cash' ? (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) : ((viewingInvoice.paidAmount || 0) - (viewingInvoice.expenseAmount || 0)))).toLocaleString()}</td>
+                          <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {Math.min(viewingInvoice.paidAmount || (viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : 0), (viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0))).toLocaleString()}</td>
                         </tr>
                         <tr>
                           <td colSpan={6}></td>
                           <td className="py-2 text-right font-black text-red-600 uppercase text-[10px] tracking-widest">Remaining Balance</td>
-                          <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {Math.max(0, (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) - Math.max(0, (viewingInvoice.paymentMethod === 'Cash' ? (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) : ((viewingInvoice.paidAmount || 0) - (viewingInvoice.expenseAmount || 0))))).toLocaleString()}</td>
+                          <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {Math.max(0, (viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)) - (viewingInvoice.paidAmount || (viewingInvoice.paymentMethod === 'Cash' ? (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) : 0))).toLocaleString()}</td>
                         </tr>
                       </>
                     ) : null}

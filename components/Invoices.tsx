@@ -155,6 +155,20 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     });
   }, [invoices, searchSalesPerson]);
 
+  const clientPurchaseHistory = React.useMemo(() => {
+    const history: Record<string, string[]> = {};
+    invoices.forEach(inv => {
+      if (!inv.clientId) return;
+      if (!history[inv.clientId]) history[inv.clientId] = [];
+      inv.items.forEach(item => {
+        if (!history[inv.clientId].includes(item.name)) {
+          history[inv.clientId].push(item.name);
+        }
+      });
+    });
+    return history;
+  }, [invoices]);
+
   // Reset dropdown when modal opens/closes
   useEffect(() => {
     if (isModalOpen) {
@@ -961,8 +975,17 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   >
                     <option value="">Select Target Client...</option>
                     {clients
-                      .filter(c => c.name.toLowerCase().includes(clientSearchTerm.toLowerCase()))
-                      .map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                      .filter(c => {
+                        const matchesName = c.name.toLowerCase().includes(clientSearchTerm.toLowerCase());
+                        const history = clientPurchaseHistory[c.id] || [];
+                        const matchesHistory = history.some(item => item.toLowerCase().includes(clientSearchTerm.toLowerCase()));
+                        return matchesName || matchesHistory;
+                      })
+                      .map(c => {
+                        const history = clientPurchaseHistory[c.id] || [];
+                        const historyText = history.length > 0 ? ` (${history.slice(0, 3).join(', ')}${history.length > 3 ? '...' : ''})` : '';
+                        return <option key={c.id} value={c.id}>{c.name}{historyText}</option>;
+                      })
                     }
                   </select>
                 </div>

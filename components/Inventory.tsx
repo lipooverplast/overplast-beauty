@@ -113,7 +113,10 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
           if (role === 'Admin' || tx.createdBy === userId) {
             if (tx.type === 'IN') acc.in += tx.quantity;
             if (tx.type === 'OUT') acc.out += tx.quantity;
-            if (tx.type === 'RETURN') acc.out += tx.quantity;
+            if (tx.type === 'RETURN') {
+              acc.out += tx.quantity;
+              acc.in -= tx.quantity;
+            }
           }
         }
         return acc;
@@ -167,12 +170,17 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     
     const source = filtered.length === 0 && safeProducts.length > 0 ? safeProducts : filtered;
     
+    // For Staff, products should ONLY appear when searching
+    if (role === 'Staff' && !catalogSearchTerm.trim()) {
+      return [];
+    }
+    
     // Filter by search term if provided
     const searchFiltered = catalogSearchTerm 
       ? source.filter(p => 
-          (p.name || '').toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
-          (p.sku || '').toLowerCase().includes(catalogSearchTerm.toLowerCase()) ||
-          (p.category || '').toLowerCase().includes(catalogSearchTerm.toLowerCase())
+          (p.name || '').toLowerCase().startsWith(catalogSearchTerm.toLowerCase()) ||
+          (p.sku || '').toLowerCase().startsWith(catalogSearchTerm.toLowerCase()) ||
+          (p.category || '').toLowerCase().startsWith(catalogSearchTerm.toLowerCase())
         )
       : source;
     
@@ -192,7 +200,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     });
     
     return Array.from(uniqueMap.values());
-  }, [safeProducts, catalogSearchTerm]);
+  }, [safeProducts, catalogSearchTerm, role]);
 
   const filteredTransactions = useMemo(() => {
     return allTransactions.filter(tx => {
@@ -1200,42 +1208,73 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {!editingProduct && (
                   <div className="md:col-span-2 space-y-4">
-                    <div className="flex flex-col md:flex-row md:items-end gap-4">
+                    <div className="flex flex-col md:flex-row md:items-start gap-4">
                       <div className="flex-1 relative">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Search Catalog</label>
-                        <Search className="absolute left-4 bottom-4 text-gray-400" size={16} />
-                        <input 
-                          type="text"
-                          placeholder="Search product name or SKU..."
-                          value={catalogSearchTerm}
-                          onChange={(e) => setCatalogSearchTerm(e.target.value)}
-                          className="w-full pl-11 pr-4 py-3 bg-white border border-gray-200 rounded-xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10 text-sm"
-                        />
+                        <div className="relative">
+                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                          <input 
+                            type="text"
+                            placeholder="Search product name or SKU..."
+                            value={catalogSearchTerm}
+                            onChange={(e) => setCatalogSearchTerm(e.target.value)}
+                            className="w-full pl-11 pr-4 py-3 bg-white border border-gray-200 rounded-xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10 text-sm"
+                          />
+                        </div>
+
+                        {/* Search Results for Staff/Admin when searching */}
+                        {catalogSearchTerm && adminProducts.length > 0 && (
+                          <div className="absolute z-20 w-full mt-2 bg-white border border-gray-100 rounded-2xl shadow-2xl max-h-60 overflow-y-auto p-2 space-y-1 animate-in slide-in-from-top-2 duration-200">
+                            {adminProducts.map(p => {
+                              const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => {
+                                    handleAdminProductSelect({ target: { value: p.id } } as any);
+                                    setCatalogSearchTerm('');
+                                  }}
+                                  className="w-full text-left px-4 py-3 hover:bg-yellow-50 rounded-xl transition-all flex flex-col group"
+                                >
+                                  <span className="text-sm font-black text-gray-900 group-hover:text-yellow-700">{p.name}</span>
+                                  {details && <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">{details}</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex-1">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Quick Select Product</label>
-                        <select 
-                          value={selectedAdminProductId}
-                          onChange={handleAdminProductSelect}
-                          required={role === 'Staff'}
-                          className="w-full px-5 py-3 bg-yellow-50 border border-yellow-100 rounded-xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10 text-sm"
-                        >
-                          {role === 'Admin' && <option value="">-- Create New Custom Product --</option>}
-                          {role === 'Staff' && <option value="">-- Select Product from Catalog --</option>}
-                          {adminProducts.map(p => {
-                            const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
-                            return (
-                              <option key={p.id} value={p.id}>
-                                {p.name} {details ? `(${details})` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
+
+                      {role === 'Admin' && (
+                        <div className="flex-1">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Quick Select Product</label>
+                          <select 
+                            value={selectedAdminProductId}
+                            onChange={handleAdminProductSelect}
+                            className="w-full px-5 py-3 bg-yellow-50 border border-yellow-100 rounded-xl font-bold outline-none focus:ring-4 focus:ring-yellow-500/10 text-sm"
+                          >
+                            <option value="">-- Create New Custom Product --</option>
+                            {adminProducts.map(p => {
+                              const details = [p.size, p.color, p.productType].filter(Boolean).join(', ');
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} {details ? `(${details})` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      )}
                     </div>
-                    {adminProducts.length === 0 && (
+                    {adminProducts.length === 0 && catalogSearchTerm && (
                       <p className="mt-2 text-[10px] text-red-500 font-bold italic">
-                        {catalogSearchTerm ? "No products match your search." : `Admin catalog is currently empty (Total System Assets: ${safeProducts.length}). Please add products as Admin first.`}
+                        No products match your search.
+                      </p>
+                    )}
+                    {role === 'Staff' && !catalogSearchTerm && !selectedAdminProductId && (
+                      <p className="mt-2 text-[10px] text-yellow-600 font-bold italic">
+                        Type at least 1 character to search products from catalog.
                       </p>
                     )}
                     <p className="mt-2 text-[10px] text-gray-400 font-bold italic">Search and select an admin product to pre-fill the details below.</p>
@@ -1244,7 +1283,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                 
                 {/* Pre-fill logic based on selectedAdminProductId */}
                 {(() => {
-                  const adminProduct = !editingProduct && selectedAdminProductId ? adminProducts.find(p => p.id === selectedAdminProductId) : null;
+                  const adminProduct = !editingProduct && selectedAdminProductId ? safeProducts.find(p => p.id === selectedAdminProductId) : null;
                   const defaultName = editingProduct?.name || adminProduct?.name || '';
                   const defaultSku = editingProduct?.sku || adminProduct?.sku || '';
                   const defaultCategory = editingProduct?.category || adminProduct?.category || '';

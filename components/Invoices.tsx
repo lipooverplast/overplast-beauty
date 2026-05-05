@@ -621,6 +621,16 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 htmlEl.style.opacity = '1';
               }
             });
+
+            // Explicitly hide elements marked as no-print or hidden-in-pdf for the PDF
+            const noPrintElements = clonedElement.querySelectorAll('.no-print, .hidden-in-pdf');
+            noPrintElements.forEach(el => {
+              const htmlEl = el as HTMLElement;
+              htmlEl.style.display = 'none';
+              htmlEl.style.visibility = 'hidden';
+              htmlEl.style.height = '0';
+              htmlEl.style.overflow = 'hidden';
+            });
           }
         }
       });
@@ -1003,30 +1013,67 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       />
                     </div>
                   </div>
-                  <select 
-                    value={activeAssetId} 
-                    onChange={e => { 
-                      const val = e.target.value;
-                      setActiveAssetId(val); 
-                      if(val) addItem(val); 
-                    }} 
-                    className="w-full p-5 bg-yellow-50 text-yellow-800 border-yellow-200 border rounded-[1.25rem] font-black text-xs outline-none"
-                  >
-                    <option value="">+ SELECT ASSET...</option>
-                    {filteredProducts
-                      .filter(p => 
-                        p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
-                        p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
-                      )
-                      .map(p => {
-                        const details = [p.size, p.color, p.productType, p.batchNo].filter(Boolean).join(', ');
-                        return (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {details ? `(${details})` : ''} — {p.stock} in stock
-                          </option>
-                        );
-                      })}
-                  </select>
+                  {role !== 'Staff' ? (
+                    <select 
+                      value={activeAssetId} 
+                      onChange={e => { 
+                        const val = e.target.value;
+                        setActiveAssetId(val); 
+                        if(val) addItem(val); 
+                      }} 
+                      className="w-full p-5 bg-yellow-50 text-yellow-800 border-yellow-200 border rounded-[1.25rem] font-black text-xs outline-none"
+                    >
+                      <option value="">+ SELECT ASSET...</option>
+                      {filteredProducts
+                        .filter(p => 
+                          p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
+                          p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
+                        )
+                        .map(p => {
+                          const details = [p.size, p.color, p.productType, p.batchNo].filter(Boolean).join(', ');
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {details ? `(${details})` : ''} — {p.stock} in stock
+                            </option>
+                          );
+                        })}
+                    </select>
+                  ) : (
+                    assetSearchTerm.length > 0 && (
+                      <div className="max-h-48 overflow-y-auto border border-gray-100 rounded-[1.25rem] bg-white divide-y divide-gray-50 shadow-sm mt-2">
+                        {filteredProducts
+                          .filter(p => 
+                            p.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) || 
+                            p.sku?.toLowerCase().includes(assetSearchTerm.toLowerCase())
+                          )
+                          .map(p => {
+                            const details = [p.size, p.color, p.productType, p.batchNo].filter(Boolean).join(', ');
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  addItem(p.id);
+                                  setAssetSearchTerm('');
+                                }}
+                                className="w-full text-left p-4 hover:bg-yellow-50 transition-colors"
+                              >
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <p className="font-black text-[11px] text-gray-900 uppercase leading-none">{p.name}</p>
+                                    <p className="text-[9px] font-bold text-gray-400 mt-1 uppercase tracking-tighter">{details || p.sku || 'No details'}</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-[10px] font-black text-yellow-600">Stock: {p.stock}</p>
+                                    <p className="text-[8px] font-black text-gray-300 uppercase mt-0.5">Click to add</p>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    )
+                  )}
                 </div>
                 <div>
                   <label className="text-[10px] font-black uppercase text-gray-400 mb-2 block tracking-widest">Tax (%)</label>
@@ -1343,47 +1390,40 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   </tbody>
                   <tfoot>
                     <tr className="border-t-4 border-black">
-                      <td colSpan={7}></td>
+                      <td colSpan={8}></td>
                       <td className="py-8 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Gross Subtotal</td>
                       <td className="py-8 text-right font-black text-gray-900 text-xl">Rs. {(viewingInvoice.subtotal || 0).toLocaleString()}</td>
                     </tr>
                     {viewingInvoice.discountTotal > 0 && (
                       <tr>
-                        <td colSpan={7}></td>
+                        <td colSpan={8}></td>
                         <td className="py-2 text-right font-black text-red-400 uppercase text-[10px] tracking-widest">Total Discount</td>
                         <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {(viewingInvoice.discountTotal || 0).toLocaleString()}</td>
                       </tr>
                     )}
                     <tr>
-                      <td colSpan={7}></td>
+                      <td colSpan={8}></td>
                       <td className="py-2 text-right font-black text-gray-400 uppercase text-[10px] tracking-widest">Tax ({viewingInvoice.taxRate}%)</td>
                       <td className="py-2 text-right font-black text-yellow-600 text-xl">Rs. {(viewingInvoice.taxTotal || 0).toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td colSpan={7}></td>
+                      <td colSpan={8}></td>
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
                       <td className="py-4 text-right font-black text-black text-2xl tracking-tighter">Rs. {(viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)).toLocaleString()}</td>
                     </tr>
                     {(viewingInvoice.paidAmount && viewingInvoice.paidAmount > 0) || viewingInvoice.paymentMethod === 'Cash' ? (
                       <>
                         <tr className="border-t border-gray-100">
-                          <td colSpan={6}></td>
+                          <td colSpan={8}></td>
                           <td className="py-2 text-right font-black text-green-600 uppercase text-[10px] tracking-widest">Amount Paid</td>
                           <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {Math.min(viewingInvoice.paidAmount || (viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : 0), (viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0))).toLocaleString()}</td>
                         </tr>
                         <tr>
-                          <td colSpan={6}></td>
+                          <td colSpan={8}></td>
                           <td className="py-2 text-right font-black text-red-600 uppercase text-[10px] tracking-widest">Remaining Balance</td>
-                          <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {Math.max(0, (viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)) - (viewingInvoice.paidAmount || (viewingInvoice.paymentMethod === 'Cash' ? (viewingInvoice.total - (viewingInvoice.expenseAmount || 0)) : 0))).toLocaleString()}</td>
+                          <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {Math.max(0, (viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)) - (viewingInvoice.paidAmount || (viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : 0))).toLocaleString()}</td>
                         </tr>
                       </>
-                    ) : null}
-                    {viewingInvoice.expenseAmount && viewingInvoice.expenseAmount > 0 ? (
-                      <tr>
-                        <td colSpan={7}></td>
-                        <td className="py-4 text-right font-black text-orange-600 uppercase text-[10px] tracking-widest pt-10">Expenses ({viewingInvoice.expenseType || 'Other'})</td>
-                        <td className="py-4 text-right font-black text-orange-600 text-xl pt-10">Rs. {viewingInvoice.expenseAmount.toLocaleString()}</td>
-                      </tr>
                     ) : null}
                   </tfoot>
                 </table>

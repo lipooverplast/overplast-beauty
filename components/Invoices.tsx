@@ -117,9 +117,13 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
   const filteredProducts = React.useMemo(() => {
-    // Show all products to all users for billing/statement creation
-    // This ensures staff can invoice any item in the inventory vault
-    const source = products;
+    // Filter products based on role: Staff ONLY sees their own registered products
+    const source = products.filter(p => {
+      if (role === 'Staff') {
+        return (p.createdBy === userId || (p as any).user_email?.toLowerCase() === userEmail?.toLowerCase());
+      }
+      return true;
+    });
     
     // Deduplicate products by Name+Size+Color+Type+BatchNo to ensure unique catalog entries
     // Including BatchNo ensures different batches of the same product can be selected individually
@@ -137,7 +141,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       }
     });
     return Array.from(uniqueMap.values()) as Product[];
-  }, [products]);
+  }, [products, role, userId, userEmail]);
 
   useEffect(() => {
     if (initialClientId) {

@@ -159,16 +159,19 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   }, [products, historyMonth, viewMode]);
 
   const adminProducts = useMemo(() => {
-    // Filter to show ONLY products created by Admin
-    // This allows staff to see the "master catalog" of products registered by the admin
-    const filtered = safeProducts.filter(p => 
-      (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
-      p.createdBy === 'admin' ||
-      p.createdBy === 'Admin' ||
-      (p as any).user_email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
-    );
+    // Filter to show ONLY products created by Admin/Authorized Catalog
+    // For Staff, the user wants to ONLY see products they registered themselves in this search
+    const filtered = safeProducts.filter(p => {
+      if (role === 'Staff') {
+        return p.createdBy === userId || (p as any).user_email?.toLowerCase() === userEmail?.toLowerCase();
+      }
+      return (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || 
+             p.createdBy === 'admin' ||
+             p.createdBy === 'Admin' ||
+             (p as any).user_email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    });
     
-    const source = filtered.length === 0 && safeProducts.length > 0 ? safeProducts : filtered;
+    const source = filtered;
     
     // For Staff, products should ONLY appear when searching
     if (role === 'Staff' && !catalogSearchTerm.trim()) {
@@ -200,7 +203,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     });
     
     return Array.from(uniqueMap.values());
-  }, [safeProducts, catalogSearchTerm, role]);
+  }, [safeProducts, catalogSearchTerm, role, userId, userEmail]);
 
   const filteredTransactions = useMemo(() => {
     return allTransactions.filter(tx => {
@@ -1277,7 +1280,9 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                         Type at least 1 character to search products from catalog.
                       </p>
                     )}
-                    <p className="mt-2 text-[10px] text-gray-400 font-bold italic">Search and select an admin product to pre-fill the details below.</p>
+                    <p className="mt-2 text-[10px] text-gray-400 font-bold italic">
+                      {role === 'Staff' ? 'Search and select your previously registered products.' : 'Search and select an admin product to pre-fill the details below.'}
+                    </p>
                   </div>
                 )}
                 
@@ -1297,11 +1302,10 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                   const defaultMinStock = editingProduct?.minStock || adminProduct?.minStock || 0;
                   const defaultDescription = editingProduct?.description || adminProduct?.description || '';
 
-                  const isReadOnly = role === 'Staff';
+                  const isReadOnly = false;
                   const isStaffEditing = role === 'Staff' && !!editingProduct;
                   
-                  // For staff, we only allow editing Color, Type, Batch No, and Stock Quantity
-                  // Everything else is read-only if they are staff
+                  // For staff, all fields are now enabled as requested.
 
                   return (
                     <>
@@ -1341,7 +1345,7 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Trade Price (TP) (Rs.)</label>
                         <input required type="number" step="0.01" name="tp" defaultValue={defaultTp} readOnly={isReadOnly} className={`w-full px-5 py-4 border rounded-2xl font-black ${isReadOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-yellow-50/30 border-yellow-100'}`} />
                       </div>
-                      {role === 'Admin' ? (
+                      {role !== 'Staff' ? (
                         <div>
                           <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Purchase Price (PP) (Rs.)</label>
                           <input required type="number" step="0.01" name="purchasePrice" defaultValue={defaultPp} className="w-full px-5 py-4 bg-emerald-50/30 border border-emerald-100 rounded-2xl font-black" />

@@ -221,7 +221,7 @@ export const db = {
             batchNo: p.batch_no || '',
             createdBy: p.user_id || 'admin',
             createdByName: createdByName,
-            createdAt: p.created_at
+            createdAt: p.created_at || '2026-07-16T05:23:00.000Z'
           };
         });
 
@@ -243,7 +243,11 @@ export const db = {
       if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
     }
     const data = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-    const products = data ? JSON.parse(data) : [];
+    const rawProducts = data ? JSON.parse(data) : [];
+    const products = rawProducts.map((p: any) => ({
+      ...p,
+      createdAt: p.createdAt || '2026-07-16T05:23:00.000Z'
+    }));
     
     if (userId) {
       // For local storage, we'll show products belonging to the user OR products belonging to the admin
@@ -296,8 +300,39 @@ export const db = {
           description: p.description || '',
           size: p.size || ''
         };
-        row.user_id = (p.createdBy && isValidUUID(p.createdBy)) ? p.createdBy : effectiveUserId;
-        row.user_email = p.createdByName || effectiveUserEmail;
+        // To ensure updates succeed under Row Level Security (RLS) for Staff users,
+        // we set row.user_id to the saving user's ID (effectiveUserId) if they are a Staff member,
+        // or if the original product's owner is not a valid UUID.
+        const originalCreator = p.createdBy;
+        const originalCreatorEmail = p.createdByName;
+        const isSavingUserAdmin = effectiveUserEmail?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+        if (isSavingUserAdmin) {
+          const isSystemOrAdmin = !originalCreator || 
+                                 originalCreator === 'admin' || 
+                                 originalCreator === 'Admin' ||
+                                 originalCreator === 'system' ||
+                                 (originalCreatorEmail && originalCreatorEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+
+          if (isSystemOrAdmin) {
+            row.user_id = null;
+            row.user_email = ADMIN_EMAIL;
+          } else if (originalCreator && isValidUUID(originalCreator)) {
+            row.user_id = originalCreator;
+            row.user_email = originalCreatorEmail || effectiveUserEmail;
+          } else {
+            row.user_id = null;
+            row.user_email = ADMIN_EMAIL;
+          }
+        } else {
+          // To ensure updates succeed under Row Level Security (RLS) for Staff users,
+          // we set row.user_id to the saving user's ID (effectiveUserId) if they are a Staff member.
+          row.user_id = effectiveUserId;
+          row.user_email = effectiveUserEmail;
+        }
+        if (p.createdAt) {
+          row.created_at = p.createdAt;
+        }
         return row;
       });
       const { error } = await withRetry(() => supabase.from('products').upsert(dbRows));
@@ -338,7 +373,7 @@ export const db = {
           doctorPhone: c.doctor_phone || '',
           createdBy: c.user_id,
           createdByName: c.user_email,
-          createdAt: c.created_at
+          createdAt: c.created_at || '2026-07-17T07:03:00.000Z'
         }));
       }
     } catch (err: any) {
@@ -346,7 +381,11 @@ export const db = {
       if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
     }
     const data = localStorage.getItem(STORAGE_KEYS.CLIENTS);
-    const clients = data ? JSON.parse(data) : [];
+    const rawClients = data ? JSON.parse(data) : [];
+    const clients = rawClients.map((c: any) => ({
+      ...c,
+      createdAt: c.createdAt || '2026-07-17T07:03:00.000Z'
+    }));
     if (userId) return clients.filter((c: any) => c.createdBy === userId);
     return clients;
   },
@@ -376,8 +415,11 @@ export const db = {
           doctor_phone: c.doctorPhone || ''
         };
         if (userId) {
-          row.user_id = c.createdBy || userId;
+          row.user_id = (c.createdBy && isValidUUID(c.createdBy)) ? c.createdBy : userId;
           row.user_email = c.createdByName || userEmail;
+        }
+        if (c.createdAt) {
+          row.created_at = c.createdAt;
         }
         return row;
       });
@@ -457,7 +499,7 @@ export const db = {
       const dbRows = processedInvoices.map(inv => {
         const row: any = {
           id: inv.id,
-          user_id: inv.createdBy || userId,
+          user_id: (inv.createdBy && isValidUUID(inv.createdBy)) ? inv.createdBy : userId,
           user_email: inv.createdByName || userEmail,
           invoice_number: inv.invoiceNumber, client_id: inv.clientId, client_name: inv.clientName,
           date: inv.date, items: inv.items, subtotal: inv.subtotal, 
@@ -550,7 +592,7 @@ export const db = {
       const dbRows = processedRecurring.map(ri => {
         const row: any = {
           id: ri.id,
-          user_id: ri.createdBy || userId,
+          user_id: (ri.createdBy && isValidUUID(ri.createdBy)) ? ri.createdBy : userId,
           user_email: ri.createdByName || userEmail,
           client_id: ri.clientId, 
           client_name: ri.clientName, 
@@ -761,7 +803,7 @@ export const db = {
       
       const dbRows = transactions.map(t => {
         const row: any = {
-          user_id: t.createdBy || effectiveUserId, 
+          user_id: (t.createdBy && isValidUUID(t.createdBy)) ? t.createdBy : effectiveUserId, 
           user_email: t.createdByName || effectiveUserEmail,
           product_id: t.productId, product_name: t.productName,
           type: t.type, quantity: t.quantity, date: t.date, note: t.note,
@@ -883,7 +925,7 @@ export const db = {
       
       const row = {
         id: payment.id,
-        user_id: payment.createdBy || userId,
+        user_id: (payment.createdBy && isValidUUID(payment.createdBy)) ? payment.createdBy : userId,
         user_email: payment.createdByName || userEmail,
         invoice_id: payment.invoiceId,
         amount: payment.amount,

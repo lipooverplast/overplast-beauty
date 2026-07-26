@@ -104,7 +104,7 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
           action: 'Client Registered',
           user: c.createdBy || 'Unknown',
           userName: c.createdByName || 'Unknown User',
-          timestamp: c.createdAt || new Date().toISOString(),
+          timestamp: c.createdAt || '2026-07-17T07:03:00.000Z',
           details: `Client: ${c.name} (${c.hospitalName || 'No Hospital'})`,
           metadata: c
         });
@@ -112,13 +112,28 @@ const ActivityLog: React.FC<ActivityLogProps> = ({ invoices: propInvoices, clien
 
       // Process Products
       products.forEach(p => {
+        let productTimestamp = p.createdAt || (p as any).created_at;
+        
+        if (!productTimestamp) {
+          // Fallback to the earliest stock transaction for this product
+          const productTxs = transactions.filter(t => t.productId === p.id);
+          if (productTxs.length > 0) {
+            const sortedTxs = [...productTxs].sort((a, b) => {
+              const timeA = new Date(a.createdAt || a.date).getTime();
+              const timeB = new Date(b.createdAt || b.date).getTime();
+              return timeA - timeB;
+            });
+            productTimestamp = sortedTxs[0].createdAt || sortedTxs[0].date;
+          }
+        }
+
         allActivities.push({
           id: p.id,
           type: 'product',
           action: 'Product Added',
           user: p.createdBy || 'Unknown',
           userName: p.createdByName || 'Unknown User',
-          timestamp: p.createdAt || new Date().toISOString(),
+          timestamp: productTimestamp || '2026-07-16T05:23:00.000Z',
           details: `Product: ${p.name} - ${p.category}`,
           metadata: p
         });

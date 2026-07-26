@@ -45,6 +45,168 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
   const [showTxDeleteConfirm, setShowTxDeleteConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+
+  // Scroll synchronization for Inventory Vault
+  const topScrollRef = React.useRef<HTMLDivElement>(null);
+  const tableContainerRef = React.useRef<HTMLDivElement>(null);
+  const tableRef = React.useRef<HTMLTableElement>(null);
+  const [tableWidth, setTableWidth] = React.useState(0);
+
+  // Scroll synchronization for Movement Ledger (History)
+  const historyTopScrollRef = React.useRef<HTMLDivElement>(null);
+  const historyTableContainerRef = React.useRef<HTMLDivElement>(null);
+  const historyTableRef = React.useRef<HTMLTableElement>(null);
+  const [historyTableWidth, setHistoryTableWidth] = React.useState(0);
+
+  React.useEffect(() => {
+    const tableEl = tableRef.current;
+    if (!tableEl) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setTableWidth(entry.target.scrollWidth);
+      }
+    });
+
+    resizeObserver.observe(tableEl);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [viewMode]);
+
+  React.useEffect(() => {
+    const topScroll = topScrollRef.current;
+    const tableContainer = tableContainerRef.current;
+    if (!topScroll || !tableContainer) return;
+
+    let isSyncingTop = false;
+    let isSyncingTable = false;
+
+    const handleTopScroll = () => {
+      if (!isSyncingTable) {
+        isSyncingTop = true;
+        tableContainer.scrollLeft = topScroll.scrollLeft;
+        isSyncingTop = false;
+      }
+    };
+
+    const handleTableScroll = () => {
+      if (!isSyncingTop) {
+        isSyncingTable = true;
+        topScroll.scrollLeft = tableContainer.scrollLeft;
+        isSyncingTable = false;
+      }
+    };
+
+    topScroll.addEventListener('scroll', handleTopScroll);
+    tableContainer.addEventListener('scroll', handleTableScroll);
+
+    return () => {
+      topScroll.removeEventListener('scroll', handleTopScroll);
+      tableContainer.removeEventListener('scroll', handleTableScroll);
+    };
+  }, [tableWidth, viewMode]);
+
+  React.useEffect(() => {
+    const tableEl = historyTableRef.current;
+    if (!tableEl) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setHistoryTableWidth(entry.target.scrollWidth);
+      }
+    });
+
+    resizeObserver.observe(tableEl);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [viewMode]);
+
+  React.useEffect(() => {
+    const topScroll = historyTopScrollRef.current;
+    const tableContainer = historyTableContainerRef.current;
+    if (!topScroll || !tableContainer) return;
+
+    let isSyncingTop = false;
+    let isSyncingTable = false;
+
+    const handleTopScroll = () => {
+      if (!isSyncingTable) {
+        isSyncingTop = true;
+        tableContainer.scrollLeft = topScroll.scrollLeft;
+        isSyncingTop = false;
+      }
+    };
+
+    const handleTableScroll = () => {
+      if (!isSyncingTop) {
+        isSyncingTable = true;
+        topScroll.scrollLeft = tableContainer.scrollLeft;
+        isSyncingTable = false;
+      }
+    };
+
+    topScroll.addEventListener('scroll', handleTopScroll);
+    tableContainer.addEventListener('scroll', handleTableScroll);
+
+    return () => {
+      topScroll.removeEventListener('scroll', handleTopScroll);
+      tableContainer.removeEventListener('scroll', handleTableScroll);
+    };
+  }, [historyTableWidth, viewMode]);
+
+  // Inline Add Stock States
+  const [inlineAddQty, setInlineAddQty] = useState<Record<string, string>>({});
+  const [isUpdatingInline, setIsUpdatingInline] = useState<Record<string, boolean>>({});
+  const [inlineLastAdded, setInlineLastAdded] = useState<Record<string, number>>({});
+
+  const handleInlineAddStock = async (product: Product) => {
+    const qtyStr = inlineAddQty[product.id] || '';
+    const qty = parseInt(qtyStr, 10);
+    if (isNaN(qty) || qty <= 0) {
+      alert("Please enter a valid quantity greater than 0");
+      return;
+    }
+
+    setIsUpdatingInline(prev => ({ ...prev, [product.id]: true }));
+    try {
+      const updatedProduct: Product = { 
+        ...product, 
+        stock: (Number(product.stock) || 0) + qty,
+        createdBy: product.createdBy || userId,
+        createdByName: product.createdByName || userEmail
+      };
+      
+      const transaction: StockTransaction = {
+        id: db.generateUUID(),
+        productId: product.id,
+        productName: product.name,
+        productSize: product.size,
+        productColor: product.color,
+        productType: product.productType,
+        type: 'IN',
+        quantity: qty,
+        date: new Date().toISOString().split('T')[0],
+        note: 'Quick Restock (Inline)',
+        createdBy: userId,
+        createdByName: userEmail
+      };
+
+      await db.saveProducts([updatedProduct], userId, userEmail);
+      await db.saveStockTransactions([transaction], userId, userEmail);
+      
+      await onUpdate();
+      setInlineAddQty(prev => ({ ...prev, [product.id]: '' }));
+      setInlineLastAdded(prev => ({ ...prev, [product.id]: (prev[product.id] || 0) + qty }));
+      alert(`Added ${qty} units to "${product.name}" successfully!`);
+    } catch (err: any) {
+      console.error("Inline Restock Error:", err);
+      alert("Failed to add stock: " + (err.message || "Unknown error"));
+    } finally {
+      setIsUpdatingInline(prev => ({ ...prev, [product.id]: false }));
+    }
+  };
   
   // History State
   const [historyMonth, setHistoryMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
@@ -140,8 +302,17 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
     }
 
     // Staff Logic:
-    // Show ONLY products registered by this specific staff member
-    const staffProducts = safeProducts.filter(p => p.createdBy === userId);
+    // Show products registered by this staff member, plus admin/global products
+    const staffProducts = safeProducts.filter(p => {
+      const isOwnProduct = p.createdBy === userId || (p as any).user_email?.toLowerCase() === userEmail?.toLowerCase();
+      const isAdminProduct = !p.createdBy || 
+                            p.createdBy === 'admin' || 
+                            p.createdBy === 'Admin' ||
+                            p.createdBy === 'system' ||
+                            (p.createdByName && p.createdByName.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
+                            ((p as any).user_email && (p as any).user_email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+      return isOwnProduct || isAdminProduct;
+    });
     
     return staffProducts.filter(p => {
       const matchesSearch = (p.name || '').toLowerCase().includes(nameSearch) || (p.sku || '').toLowerCase().includes(nameSearch);
@@ -236,9 +407,9 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
       
       const updatedProduct: Product = { 
         ...editingProduct, 
-        stock: editingProduct.stock + restockQty,
-        createdBy: userId,
-        createdByName: userEmail
+        stock: (Number(editingProduct.stock) || 0) + restockQty,
+        createdBy: editingProduct.createdBy || userId,
+        createdByName: editingProduct.createdByName || userEmail
       };
       
       const transaction: StockTransaction = {
@@ -704,8 +875,17 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
             </div>
           </div>
 
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left border-collapse min-w-[900px]">
+          {/* Top Synchronized Scrollbar */}
+          <div 
+            ref={topScrollRef} 
+            className="overflow-x-auto border-b border-gray-100 bg-gray-50/30"
+            style={{ width: '100%', scrollbarWidth: 'thin' }}
+          >
+            <div style={{ width: `${tableWidth}px`, height: '6px' }} />
+          </div>
+
+          <div ref={tableContainerRef} className="overflow-x-auto w-full">
+            <table ref={tableRef} className="w-full text-left border-collapse min-w-[900px]">
               <thead>
                 <tr className="bg-gray-50 text-gray-400 text-[9px] font-black uppercase tracking-[0.2em] border-b border-gray-200">
                   <th className="px-8 py-6">Product</th>
@@ -788,28 +968,31 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                          <div className="text-sm font-black text-yellow-700">Rs. {(product.tp || 0).toFixed(2)}</div>
                       </td>
                           <td className="px-6 py-5">
-                            <div className="flex items-center gap-3">
-                              <div className="flex flex-col">
+                            <div className="flex items-center gap-3 flex-wrap md:flex-nowrap">
+                              <div className="flex flex-col min-w-[3rem]">
                                 <span className="text-sm font-black text-gray-900">{product.stock || 0}</span>
-                                <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1">
+                                <div className="w-14 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1">
                                    <div className={`h-full rounded-full ${product.stock <= product.minStock ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${Math.min(((product.stock || 0) / Math.max(product.minStock * 2, 1)) * 100, 100)}%` }} />
                                 </div>
                               </div>
                               <button 
                                 onClick={() => { setEditingProduct(product); setIsReturnModalOpen(true); }} 
                                 disabled={!canManageStock}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all shadow-sm ml-2 ${
+                                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg transition-all shadow-sm ${
                                   canManageStock 
                                   ? 'bg-amber-50 border-amber-100 text-amber-600 hover:bg-amber-100' 
                                   : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
                                 }`}
                                 title={canManageStock ? "Stock Return" : "Read-only Asset"}
                               >
-                                <RefreshCw size={12} />
-                                <span className="text-[9px] font-black uppercase tracking-widest whitespace-nowrap">Stock Return</span>
+                                <RefreshCw size={11} />
+                                <span className="text-[8px] font-black uppercase tracking-widest whitespace-nowrap">Return</span>
                               </button>
+
+
                             </div>
                           </td>
+
                       <td className="px-6 py-5">
                         <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${status.color}`}>
                           {status.label}
@@ -820,18 +1003,15 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                           <button onClick={() => viewItemHistory(product.name)} className="p-2.5 bg-blue-50 border border-blue-100 text-blue-600 hover:bg-blue-100 rounded-xl transition-all shadow-sm" title="Movement History">
                             <Clock size={16} />
                           </button>
-                          <button 
-                            onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} 
-                            disabled={!canManageStock}
-                            className={`p-2.5 rounded-xl transition-all shadow-sm border ${
-                              canManageStock 
-                              ? 'bg-green-50 border-green-100 text-green-600 hover:bg-green-100' 
-                              : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
-                            }`}
-                            title={canManageStock ? "Restock Assets" : "Read-only Asset"}
-                          >
-                            <ArrowUpCircle size={16} />
-                          </button>
+                          {role === 'Admin' && (
+                            <button 
+                              onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} 
+                              className="p-2.5 rounded-xl transition-all shadow-sm border bg-green-50 border-green-100 text-green-600 hover:bg-green-100"
+                              title="Restock Assets"
+                            >
+                              <ArrowUpCircle size={16} />
+                            </button>
+                          )}
                           <button 
                             onClick={() => { setEditingProduct(product); setIsModalOpen(true); }} 
                             disabled={!canModify}
@@ -984,8 +1164,17 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                  </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse print:text-[8px]">
+              {/* Top Synchronized Scrollbar */}
+              <div 
+                ref={historyTopScrollRef} 
+                className="overflow-x-auto border-b border-gray-100 bg-gray-50/30 no-print"
+                style={{ width: '100%', scrollbarWidth: 'thin' }}
+              >
+                <div style={{ width: `${historyTableWidth}px`, height: '6px' }} />
+              </div>
+
+              <div ref={historyTableContainerRef} className="overflow-x-auto w-full">
+                <table ref={historyTableRef} className="w-full text-left border-collapse print:text-[8px] min-w-[900px]">
                   <thead className="bg-gray-50 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 border-b print:bg-white print:border-gray-300">
                     <tr>
                       <th className="px-8 py-6 print:px-2 print:py-2">Date</th>

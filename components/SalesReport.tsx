@@ -223,8 +223,15 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
             creditSalesValue += item.total;
           }
 
-          const creator = inv.createdByName || 'Admin';
-          const displayName = inv.salesPerson ? `${inv.salesPerson} (${creator})` : creator;
+          const cleanEmailToLocation = (emailStr?: string) => {
+            if (!emailStr) return 'HEAD OFFICE';
+            const clean = emailStr.includes('@') ? emailStr.split('@')[0].toUpperCase() : emailStr.toUpperCase();
+            if (clean === 'ADMIN' || clean === 'GUEST' || clean === 'SYSTEM' || clean === 'HEAD OFFICE' || clean === 'HQ') {
+              return 'HEAD OFFICE';
+            }
+            return clean;
+          };
+          const displayName = cleanEmailToLocation(inv.createdByName);
           salesMap.set(displayName, (salesMap.get(displayName) || 0) + item.quantity);
         });
       });

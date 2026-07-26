@@ -19,6 +19,14 @@ const UserManagement: React.FC<{ onUpdate: () => void, onBackToDashboard?: () =>
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
 
+  // Change Password States
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [selectedProfileForPassword, setSelectedProfileForPassword] = useState<Profile | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+
   useEffect(() => {
     fetchProfiles();
   }, []);
@@ -60,6 +68,34 @@ const UserManagement: React.FC<{ onUpdate: () => void, onBackToDashboard?: () =>
       console.error("Failed to delete user profile:", err);
     } finally {
       setIsUpdating(null);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProfileForPassword) return;
+    if (!newPassword.trim()) {
+      setPasswordError("Password cannot be empty.");
+      return;
+    }
+    setIsSavingPassword(true);
+    setPasswordError('');
+    setPasswordSuccess('');
+    try {
+      await db.updateProfilePassword(selectedProfileForPassword.id, newPassword.trim());
+      setPasswordSuccess("Password updated successfully!");
+      await fetchProfiles(true);
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setSelectedProfileForPassword(null);
+        setNewPassword('');
+        setPasswordSuccess('');
+      }, 1500);
+    } catch (err: any) {
+      console.error("Change password failed:", err);
+      setPasswordError(err?.message || "Failed to update password. Please try again.");
+    } finally {
+      setIsSavingPassword(false);
     }
   };
 
@@ -171,6 +207,18 @@ const UserManagement: React.FC<{ onUpdate: () => void, onBackToDashboard?: () =>
                   <td className="px-8 py-5 text-right">
                     <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
+                        onClick={() => {
+                          setSelectedProfileForPassword(p);
+                          setNewPassword(p.password || '');
+                          setShowPasswordModal(true);
+                        }}
+                        disabled={isUpdating === p.id}
+                        title="Change Password"
+                        className="p-2.5 bg-white border border-yellow-100 text-yellow-600 hover:bg-yellow-500 hover:text-white rounded-xl transition-all shadow-sm"
+                      >
+                         <Key size={18} />
+                      </button>
+                      <button 
                         onClick={() => handleStatusToggle(p.id, p.status)}
                         disabled={isUpdating === p.id}
                         title={p.status === 'Suspended' ? 'Unsuspend User' : 'Suspend User'}
@@ -229,6 +277,83 @@ const UserManagement: React.FC<{ onUpdate: () => void, onBackToDashboard?: () =>
             </div>
             <div className="p-4 bg-gray-50 border-t border-gray-100 text-center">
                <p className="text-[8px] font-black text-gray-400 uppercase tracking-[0.2em]">Security Protocol v2.5</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showPasswordModal && selectedProfileForPassword && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden border border-yellow-100 animate-in zoom-in-95 duration-200">
+            <form onSubmit={handleChangePassword}>
+              <div className="p-10 text-center">
+                <div className="w-20 h-20 bg-yellow-50 text-yellow-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
+                  <Lock size={40} />
+                </div>
+                <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2">Change Password</h3>
+                <p className="text-sm text-gray-500 font-bold mb-6 leading-relaxed px-4">
+                  Set a new password/security key for <span className="text-yellow-600 font-black">"{selectedProfileForPassword.email}"</span>.
+                </p>
+
+                {passwordError && (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-100 text-red-600 text-xs font-bold rounded-2xl flex items-center gap-2 text-left">
+                    <AlertCircle size={16} className="shrink-0" />
+                    <span>{passwordError}</span>
+                  </div>
+                )}
+
+                {passwordSuccess && (
+                  <div className="mb-4 p-4 bg-green-50 border border-green-100 text-green-600 text-xs font-bold rounded-2xl flex items-center gap-2 text-left">
+                    <CheckCircle2 size={16} className="shrink-0" />
+                    <span>{passwordSuccess}</span>
+                  </div>
+                )}
+
+                <div className="mb-8">
+                  <input
+                    type="text"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new security key/password"
+                    disabled={isSavingPassword || !!passwordSuccess}
+                    className="w-full px-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl font-bold text-sm text-center outline-none focus:ring-4 focus:ring-yellow-50 focus:bg-white focus:border-yellow-500 transition-all"
+                    required
+                  />
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <button
+                    type="submit"
+                    disabled={isSavingPassword || !!passwordSuccess}
+                    className="w-full py-5 bg-black text-white font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-gray-900 transition-all shadow-xl flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSavingPassword ? (
+                      <Loader2 className="animate-spin" size={16} />
+                    ) : (
+                      <Key size={16} className="text-yellow-500" />
+                    )}
+                    Save New Password
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPasswordModal(false);
+                      setSelectedProfileForPassword(null);
+                      setNewPassword('');
+                      setPasswordError('');
+                      setPasswordSuccess('');
+                    }}
+                    disabled={isSavingPassword}
+                    className="w-full py-5 bg-gray-100 text-gray-600 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-gray-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </form>
+            <div className="p-4 bg-gray-50 border-t border-gray-100 text-center">
+              <p className="text-[8px] font-black text-gray-400 uppercase tracking-[0.2em]">Security Protocol v2.5</p>
             </div>
           </div>
         </div>

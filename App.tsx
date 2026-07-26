@@ -236,7 +236,7 @@ const App: React.FC = () => {
     }
     
     if (isManual) setIsRefreshing(true);
-    else setIsLoading(true);
+    else if (products.length === 0) setIsLoading(true);
     
     try {
       const isAdminMode = demoSession?.role === 'Admin' || 
@@ -354,7 +354,6 @@ const App: React.FC = () => {
                   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
                   { id: 'inventory', label: 'Assets', icon: Package },
                   { id: 'invoices', label: 'Billing', icon: FileText },
-                  { id: 'recurring', label: 'Subscriptions', icon: Repeat },
                   { id: 'clients', label: 'Network', icon: Users },
                   { id: 'reports', label: 'Reports', icon: BarChart3 },
                 ].map((item) => (

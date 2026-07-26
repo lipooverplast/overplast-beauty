@@ -41,6 +41,15 @@ const InvoiceLogo = () => (
   </div>
 );
 
+export const cleanEmailToLocation = (emailStr?: string) => {
+  if (!emailStr) return 'HEAD OFFICE';
+  const clean = emailStr.includes('@') ? emailStr.split('@')[0].toUpperCase() : emailStr.toUpperCase();
+  if (clean === 'ADMIN' || clean === 'GUEST' || clean === 'SYSTEM' || clean === 'HEAD OFFICE' || clean === 'HQ') {
+    return 'HEAD OFFICE';
+  }
+  return clean;
+};
+
 interface InvoicesProps {
   invoices: Invoice[];
   products: Product[];
@@ -79,7 +88,8 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [invoiceToReturn, setInvoiceToReturn] = useState<Invoice | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentNote, setPaymentNote] = useState('');
-  const [searchSalesPerson, setSearchSalesPerson] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState<'All' | 'Cash' | 'Credit'>('All');
 
   const exportToExcel = () => {
     const dataToExport = filteredInvoices.map(inv => {
@@ -87,12 +97,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       const isReturned = inv.status === 'Returned';
       const paid = isReturned ? 0 : (pMethod === 'Cash' ? inv.total : (inv.paidAmount || 0));
       const balance = isReturned ? 0 : (inv.total - paid);
+      const itemsString = (inv.items || []).map(item => `${item.name} (${item.quantity} Qty)`).join(', ');
       
       return {
         'Statement #': inv.invoiceNumber,
         'Date': inv.date,
         'Client': inv.clientName,
-        'Sales Person': inv.salesPerson || inv.createdByName || 'N/A',
+        'Products & Units': itemsString,
+        'Sales Person': cleanEmailToLocation(inv.createdByName),
         'Method': pMethod,
         'Subtotal': inv.subtotal,
         'Discount': inv.discountTotal,
@@ -115,6 +127,60 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const topScrollRef = React.useRef<HTMLDivElement>(null);
+  const tableContainerRef = React.useRef<HTMLDivElement>(null);
+  const tableRef = React.useRef<HTMLTableElement>(null);
+  const [tableWidth, setTableWidth] = React.useState(0);
+
+  React.useEffect(() => {
+    const tableEl = tableRef.current;
+    if (!tableEl) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setTableWidth(entry.target.scrollWidth);
+      }
+    });
+
+    resizeObserver.observe(tableEl);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const topScroll = topScrollRef.current;
+    const tableContainer = tableContainerRef.current;
+    if (!topScroll || !tableContainer) return;
+
+    let isSyncingTop = false;
+    let isSyncingTable = false;
+
+    const handleTopScroll = () => {
+      if (!isSyncingTable) {
+        isSyncingTop = true;
+        tableContainer.scrollLeft = topScroll.scrollLeft;
+        isSyncingTop = false;
+      }
+    };
+
+    const handleTableScroll = () => {
+      if (!isSyncingTop) {
+        isSyncingTable = true;
+        topScroll.scrollLeft = tableContainer.scrollLeft;
+        isSyncingTable = false;
+      }
+    };
+
+    topScroll.addEventListener('scroll', handleTopScroll);
+    tableContainer.addEventListener('scroll', handleTableScroll);
+
+    return () => {
+      topScroll.removeEventListener('scroll', handleTopScroll);
+      tableContainer.removeEventListener('scroll', handleTableScroll);
+    };
+  }, [tableWidth]);
   
   const filteredProducts = React.useMemo(() => {
     // Filter products based on role: Staff ONLY sees their own registered products
@@ -153,11 +219,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
   const filteredInvoices = React.useMemo(() => {
     return invoices.filter(inv => {
-      const matchesSalesPerson = (inv.salesPerson || '').toLowerCase().includes(searchSalesPerson.toLowerCase()) ||
-                                (inv.createdByName || '').toLowerCase().includes(searchSalesPerson.toLowerCase());
-      return matchesSalesPerson;
+      // Filter by payment method
+      if (paymentFilter !== 'All') {
+        const pMethod = inv.paymentMethod || 'Cash';
+        if (pMethod !== paymentFilter) return false;
+      }
+
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+      const matchesClient = (inv.clientName || '').toLowerCase().includes(q);
+      const matchesInvoice = (inv.invoiceNumber || '').toLowerCase().includes(q);
+      return matchesClient || matchesInvoice;
     });
-  }, [invoices, searchSalesPerson]);
+  }, [invoices, searchQuery, paymentFilter]);
 
   const clientPurchaseHistory = React.useMemo(() => {
     const history: Record<string, string[]> = {};
@@ -776,11 +850,25 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-black transition-colors" />
             <input 
               type="text" 
-              placeholder="Search Sales Person..." 
-              value={searchSalesPerson}
-              onChange={e => setSearchSalesPerson(e.target.value)}
+              placeholder="Search Client or Statement #..." 
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
               className="pl-12 pr-6 py-4 bg-white border border-gray-200 rounded-2xl font-bold text-xs outline-none focus:ring-2 focus:ring-black w-64 transition-all"
             />
+          </div>
+          <div className="relative">
+            <select
+              value={paymentFilter}
+              onChange={e => setPaymentFilter(e.target.value as 'All' | 'Cash' | 'Credit')}
+              className="pl-6 pr-10 py-4 bg-white border border-gray-200 rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-black cursor-pointer appearance-none transition-all"
+            >
+              <option value="All">All Statements</option>
+              <option value="Cash">Cash Ledger</option>
+              <option value="Credit">Credit Ledger</option>
+            </select>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+              <ChevronDown size={14} strokeWidth={3} />
+            </div>
           </div>
           <button onClick={() => setIsModalOpen(true)} className="bg-black hover:bg-gray-800 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center gap-2 shadow-xl transition-all">
             <Plus size={18} className="text-yellow-500" /> Create New Statement
@@ -789,12 +877,22 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       </div>
 
       <div className="bg-white rounded-[2.5rem] border border-gray-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        {/* Top Synchronized Scrollbar */}
+        <div 
+          ref={topScrollRef} 
+          className="overflow-x-auto border-b border-gray-100 bg-gray-50/30"
+          style={{ width: '100%', scrollbarWidth: 'thin' }}
+        >
+          <div style={{ width: `${tableWidth}px`, height: '6px' }} />
+        </div>
+
+        <div ref={tableContainerRef} className="overflow-x-auto">
+          <table ref={tableRef} className="w-full text-left border-collapse">
             <thead className="bg-gray-50 text-[9px] font-black uppercase tracking-[0.2em] text-gray-400 border-b">
               <tr>
                 <th className="px-6 py-6">Statement #</th>
                 <th className="px-6 py-6">Client</th>
+                <th className="px-6 py-6">Products & Units</th>
                 <th className="px-6 py-6">Sales Person</th>
                 <th className="px-6 py-6">Method</th>
                 <th className="px-6 py-6 text-right">Total</th>
@@ -819,10 +917,21 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     </td>
                     <td className="px-6 py-5 font-bold text-gray-600">{inv.clientName}</td>
                     <td className="px-6 py-5">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-gray-900 uppercase tracking-tighter">{inv.salesPerson || '-'}</span>
-                        <span className="text-[8px] font-bold text-gray-400 lowercase tracking-tight">{inv.createdByName || 'Admin'}</span>
+                      <div className="flex flex-col gap-1.5 max-w-[200px]">
+                        {(inv.items || []).map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between gap-3 text-[10px] bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
+                            <span className="font-bold text-gray-700 truncate" title={item.name}>{item.name}</span>
+                            <span className="font-black text-black shrink-0 bg-yellow-400/80 px-1.5 py-0.5 rounded text-[8px] tracking-tight uppercase">
+                              {item.quantity} Qty
+                            </span>
+                          </div>
+                        ))}
                       </div>
+                    </td>
+                    <td className="px-6 py-5">
+                      <span className="text-[10px] font-black text-gray-900 uppercase tracking-tighter">
+                        {cleanEmailToLocation(inv.createdByName)}
+                      </span>
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-400">
@@ -885,7 +994,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
               })}
               {invoices.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-20 text-center opacity-30">
+                  <td colSpan={10} className="px-6 py-20 text-center opacity-30">
                     <FileText size={48} className="mx-auto mb-4" />
                     <p className="text-[10px] font-black uppercase tracking-widest">No statements registered</p>
                   </td>

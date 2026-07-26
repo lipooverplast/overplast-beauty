@@ -86,6 +86,7 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
       hospitalName: formData.get('hospitalName') as string,
       doctorPhone: formData.get('doctorPhone') as string,
       createdBy: editingClient?.createdBy || userId,
+      createdAt: editingClient?.createdAt || new Date().toISOString(),
     };
     
     try {

@@ -1003,27 +1003,32 @@ const Inventory: React.FC<InventoryProps> = ({ products = [], onUpdate, role, us
                           <button onClick={() => viewItemHistory(product.name)} className="p-2.5 bg-blue-50 border border-blue-100 text-blue-600 hover:bg-blue-100 rounded-xl transition-all shadow-sm" title="Movement History">
                             <Clock size={16} />
                           </button>
-                          {role === 'Admin' && (
-                            <button 
-                              onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} 
-                              className="p-2.5 rounded-xl transition-all shadow-sm border bg-green-50 border-green-100 text-green-600 hover:bg-green-100"
-                              title="Restock Assets"
-                            >
-                              <ArrowUpCircle size={16} />
-                            </button>
-                          )}
                           <button 
-                            onClick={() => { setEditingProduct(product); setIsModalOpen(true); }} 
-                            disabled={!canModify}
+                            onClick={() => { setEditingProduct(product); setIsRestockModalOpen(true); }} 
+                            disabled={!canManageStock}
                             className={`p-2.5 rounded-xl transition-all shadow-sm border ${
-                              canModify 
-                              ? 'bg-white border-gray-200 text-gray-400 hover:text-black' 
+                              canManageStock 
+                              ? 'bg-green-50 border-green-100 text-green-600 hover:bg-green-100' 
                               : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
                             }`}
-                            title={canModify ? "Edit Item" : "Read-only Asset"}
+                            title={canManageStock ? "Restock Assets" : "Read-only Asset"}
                           >
-                            <Edit size={16} />
+                            <ArrowUpCircle size={16} />
                           </button>
+                          {role === 'Admin' && (
+                            <button 
+                              onClick={() => { setEditingProduct(product); setIsModalOpen(true); }} 
+                              disabled={!canModify}
+                              className={`p-2.5 rounded-xl transition-all shadow-sm border ${
+                                canModify 
+                                ? 'bg-white border-gray-200 text-gray-400 hover:text-black' 
+                                : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+                              }`}
+                              title={canModify ? "Edit Item" : "Read-only Asset"}
+                            >
+                              <Edit size={16} />
+                            </button>
+                          )}
                           <button 
                             onClick={(e) => triggerDeleteConfirm(e, product)} 
                             disabled={isDeleting || !canModify}

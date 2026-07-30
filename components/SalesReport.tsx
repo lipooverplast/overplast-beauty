@@ -6,6 +6,7 @@ import {
   RefreshCcw, ChevronDown, ChevronUp, Filter, AlertCircle, Download, Loader2
 } from 'lucide-react';
 import { Product, Invoice, StockTransaction, UserRole } from '../types';
+import { cleanEmailToLocation } from './Invoices';
 import { APP_LOGO_URL, APP_NAME } from '../constants';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -223,15 +224,7 @@ const SalesReport: React.FC<SalesReportProps> = ({ products, invoices, transacti
             creditSalesValue += item.total;
           }
 
-          const cleanEmailToLocation = (emailStr?: string) => {
-            if (!emailStr) return 'HEAD OFFICE';
-            const clean = emailStr.includes('@') ? emailStr.split('@')[0].toUpperCase() : emailStr.toUpperCase();
-            if (clean === 'ADMIN' || clean === 'GUEST' || clean === 'SYSTEM' || clean === 'HEAD OFFICE' || clean === 'HQ') {
-              return 'HEAD OFFICE';
-            }
-            return clean;
-          };
-          const displayName = cleanEmailToLocation(inv.createdByName);
+          const displayName = cleanEmailToLocation(inv.salesPerson || inv.createdByName);
           salesMap.set(displayName, (salesMap.get(displayName) || 0) + item.quantity);
         });
       });

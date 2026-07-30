@@ -43,10 +43,23 @@ const InvoiceLogo = () => (
 
 export const cleanEmailToLocation = (emailStr?: string) => {
   if (!emailStr) return 'HEAD OFFICE';
-  const clean = emailStr.includes('@') ? emailStr.split('@')[0].toUpperCase() : emailStr.toUpperCase();
-  if (clean === 'ADMIN' || clean === 'GUEST' || clean === 'SYSTEM' || clean === 'HEAD OFFICE' || clean === 'HQ') {
+  let clean = emailStr.includes('@') ? emailStr.split('@')[0].trim() : emailStr.trim();
+  clean = clean.toUpperCase();
+
+  if (!clean || clean === 'ADMIN' || clean === 'GUEST' || clean === 'SYSTEM' || clean === 'HEAD OFFICE' || clean === 'HQ') {
     return 'HEAD OFFICE';
   }
+
+  const match = clean.match(/^(.*?)[_\s-]*(\d+)$/);
+  if (match) {
+    const cityName = match[1].trim();
+    const num = parseInt(match[2], 10);
+    if (!isNaN(num)) {
+      const mappedNum = (num % 2 === 1) ? 1 : 2;
+      return cityName ? `${cityName} ${mappedNum}` : `SALES PERSON ${mappedNum}`;
+    }
+  }
+
   return clean;
 };
 
@@ -104,7 +117,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         'Date': inv.date,
         'Client': inv.clientName,
         'Products & Units': itemsString,
-        'Sales Person': cleanEmailToLocation(inv.createdByName),
+        'Sales Person': cleanEmailToLocation(inv.salesPerson || inv.createdByName),
         'Method': pMethod,
         'Subtotal': inv.subtotal,
         'Discount': inv.discountTotal,
@@ -930,7 +943,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     </td>
                     <td className="px-6 py-5">
                       <span className="text-[10px] font-black text-gray-900 uppercase tracking-tighter">
-                        {cleanEmailToLocation(inv.createdByName)}
+                        {cleanEmailToLocation(inv.salesPerson || inv.createdByName)}
                       </span>
                     </td>
                     <td className="px-6 py-5">

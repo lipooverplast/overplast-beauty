@@ -55,8 +55,7 @@ export const cleanEmailToLocation = (emailStr?: string) => {
     const cityName = match[1].trim();
     const num = parseInt(match[2], 10);
     if (!isNaN(num)) {
-      const mappedNum = (num % 2 === 1) ? 1 : 2;
-      return cityName ? `${cityName} ${mappedNum}` : `SALES PERSON ${mappedNum}`;
+      return cityName ? `${cityName} ${num}` : `SALES PERSON ${num}`;
     }
   }
 

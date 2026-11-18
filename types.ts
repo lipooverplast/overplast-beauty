@@ -87,6 +87,7 @@ export interface Payment {
   note?: string;
   createdBy?: string;
   createdByName?: string;
+  createdAt?: string;
 }
 
 export interface Invoice {
@@ -111,6 +112,7 @@ export interface Invoice {
   createdBy?: string;
   createdByName?: string;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export type Frequency = 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';

@@ -85,8 +85,8 @@ const App: React.FC = () => {
           }
         }
       } else if (errorMsg.includes('fetch') || errorMsg.includes('network')) {
-        // Ignore errors that should be silenced (like MetaMask or background fetches)
-        const silencePatterns = ['metamask', 'ethereum', 'web3', 'rpc', 'provider', 'wallet', 'failed to connect to metamask'];
+        // Ignore errors that should be silenced (like MetaMask, extensions, or non-critical background fetches)
+        const silencePatterns = ['metamask', 'ethereum', 'web3', 'rpc', 'provider', 'wallet', 'failed to connect to metamask', 'chrome-extension', 'extension', 'gemini', 'proxy'];
         if (silencePatterns.some(p => errorMsg.includes(p))) {
           return;
         }

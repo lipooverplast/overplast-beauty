@@ -62,6 +62,55 @@ export const cleanEmailToLocation = (emailStr?: string) => {
   return clean;
 };
 
+export const getInvoicePaymentSummary = (inv: Invoice, recordedPayments?: Payment[]) => {
+  const netTotal = Math.max(0, (inv.subtotal || 0) - (inv.discountTotal || 0) + (inv.taxTotal || 0));
+  const isReturned = inv.status === 'Returned';
+  const pMethod = inv.paymentMethod || 'Cash';
+
+  if (isReturned) {
+    return { netTotal, paid: 0, balance: 0 };
+  }
+  if (pMethod === 'Cash') {
+    return { netTotal, paid: netTotal, balance: 0 };
+  }
+
+  const rawPaid = Number(inv.paidAmount) || 0;
+  let paid = rawPaid;
+  // Guard against previously inconsistent Pending Credit invoices whose paidAmount was stuck at Cash total
+  if (inv.status === 'Pending' && netTotal > 0 && rawPaid >= netTotal) {
+    paid = recordedPayments
+      ? recordedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      : 0;
+  }
+  paid = Math.min(Math.max(0, paid), netTotal);
+  const balance = Math.max(0, netTotal - paid);
+  return { netTotal, paid, balance };
+};
+
+export const formatInvoiceDateTime = (isoString?: string, fallbackDate?: string) => {
+  if (isoString) {
+    const d = new Date(isoString);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString('en-US', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    }
+  }
+  return fallbackDate || '';
+};
+
+export const getPaymentTimestamp = (p: Payment) => {
+  if (p.date && p.date.length > 10 && !p.date.includes('T00:00:00') && !p.date.includes(' 00:00:00')) {
+    return p.date;
+  }
+  return p.createdAt || p.date;
+};
+
 interface InvoicesProps {
   invoices: Invoice[];
   products: Product[];
@@ -102,18 +151,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const [paymentNote, setPaymentNote] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<'All' | 'Cash' | 'Credit'>('All');
+  const [viewingEditTime, setViewingEditTime] = useState<string | undefined>(undefined);
 
   const exportToExcel = () => {
     const dataToExport = filteredInvoices.map(inv => {
-      const pMethod = inv.paymentMethod || 'Cash';
-      const isReturned = inv.status === 'Returned';
-      const paid = isReturned ? 0 : (pMethod === 'Cash' ? inv.total : (inv.paidAmount || 0));
-      const balance = isReturned ? 0 : (inv.total - paid);
+      const pMethod = inv.status === 'Paid' ? 'Cash' : (inv.paymentMethod || 'Cash');
+      const { netTotal, paid, balance } = getInvoicePaymentSummary(inv);
       const itemsString = (inv.items || []).map(item => `${item.name} (${item.quantity} Qty)`).join(', ');
       
       return {
         'Statement #': inv.invoiceNumber,
         'Date': inv.date,
+        'Created Date & Time': formatInvoiceDateTime(inv.createdAt, inv.date),
+        'Paid Date & Time': inv.status === 'Paid' && inv.updatedAt ? formatInvoiceDateTime(inv.updatedAt) : '-',
         'Client': inv.clientName,
         'Products & Units': itemsString,
         'Sales Person': cleanEmailToLocation(inv.salesPerson || inv.createdByName),
@@ -122,7 +172,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
         'Discount': inv.discountTotal,
         'Tax': inv.taxTotal,
         'Expenses': inv.expenseAmount || 0,
-        'Total': inv.subtotal - (inv.discountTotal || 0) + (inv.taxTotal || 0),
+        'Total': netTotal,
         'Paid': paid,
         'Balance': balance,
         'Status': inv.status
@@ -233,7 +283,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     return invoices.filter(inv => {
       // Filter by payment method
       if (paymentFilter !== 'All') {
-        const pMethod = inv.paymentMethod || 'Cash';
+        const pMethod = inv.status === 'Paid' ? 'Cash' : (inv.paymentMethod || 'Cash');
         if (pMethod !== paymentFilter) return false;
       }
 
@@ -406,13 +456,52 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
     
     const invoiceId = isEditing && editingInvoiceId ? editingInvoiceId : db.generateUUID();
     const originalInvoice = isEditing ? invoices.find(inv => inv.id === editingInvoiceId) : null;
+    const nowIso = new Date().toISOString();
+
+    let creditPaidAmount = 0;
+    if (paymentMethod === 'Credit' && isEditing && originalInvoice) {
+      const prevNetTotal = Math.max(
+        0,
+        (originalInvoice.subtotal || 0) - (originalInvoice.discountTotal || 0) + (originalInvoice.taxTotal || 0)
+      );
+      const prevPaid = Number(originalInvoice.paidAmount) || 0;
+
+      if (originalInvoice.paymentMethod === 'Cash' || (originalInvoice.status === 'Pending' && prevNetTotal > 0 && prevPaid >= prevNetTotal)) {
+        // Switched from Cash to Credit (or repairing an inconsistent Pending Credit invoice):
+        // only preserve actual recorded installment payments (0 if none were recorded).
+        try {
+          const existingPayments = await db.getPayments(invoiceId);
+          creditPaidAmount = existingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        } catch {
+          creditPaidAmount = 0;
+        }
+      } else {
+        creditPaidAmount = prevPaid;
+      }
+      creditPaidAmount = Math.min(Math.max(0, creditPaidAmount), grandTotal);
+    }
+
+    const finalPaidAmount = paymentMethod === 'Cash' ? grandTotal : creditPaidAmount;
+    const finalStatus: Invoice['status'] =
+      paymentMethod === 'Cash'
+        ? 'Paid'
+        : (grandTotal > 0 && finalPaidAmount >= grandTotal ? 'Paid' : 'Pending');
+
+    const paidAt =
+      finalStatus === 'Paid'
+        ? (isEditing && originalInvoice
+            ? (originalInvoice.status !== 'Paid' ? nowIso : originalInvoice.updatedAt)
+            : undefined)
+        : undefined;
+
+    const finalPaymentMethod: 'Cash' | 'Credit' = finalStatus === 'Paid' ? 'Cash' : paymentMethod;
 
     const newInvoice: Invoice = {
       id: invoiceId,
       invoiceNumber: isEditing && originalInvoice ? originalInvoice.invoiceNumber : `OVI-${Math.floor(Math.random() * 90000) + 10000}`,
       clientId: client.id,
       clientName: client.name,
-      date: isEditing && originalInvoice ? originalInvoice.date : new Date().toISOString().split('T')[0],
+      date: isEditing && originalInvoice ? originalInvoice.date : nowIso.split('T')[0],
       items: selectedItems,
       subtotal,
       discountRate,
@@ -422,12 +511,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
       total: grandTotal,
       expenseType: expenseType,
       expenseAmount: expenseAmount,
-      status: paymentMethod === 'Cash' ? 'Paid' : 'Pending',
-      paymentMethod: paymentMethod,
-      paidAmount: paymentMethod === 'Cash' ? grandTotal : (isEditing && originalInvoice ? originalInvoice.paidAmount : 0),
+      status: finalStatus,
+      paymentMethod: finalPaymentMethod,
+      paidAmount: finalPaidAmount,
       salesPerson: salesPerson,
       createdBy: isEditing && originalInvoice ? originalInvoice.createdBy : userId,
-      createdByName: isEditing && originalInvoice ? originalInvoice.createdByName : userEmail
+      createdByName: isEditing && originalInvoice ? originalInvoice.createdByName : userEmail,
+      createdAt: isEditing && originalInvoice ? (originalInvoice.createdAt || originalInvoice.date) : nowIso,
+      updatedAt: paidAt
     };
 
     try {
@@ -536,7 +627,19 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
   useEffect(() => {
     if (viewingInvoice) {
+      setPayments([]);
       fetchPayments(viewingInvoice.id);
+      if (viewingInvoice.updatedAt) {
+        setViewingEditTime(viewingInvoice.updatedAt);
+      } else {
+        setViewingEditTime(undefined);
+        db.getInvoiceEditTimestamp(viewingInvoice.invoiceNumber).then(ts => {
+          if (ts) setViewingEditTime(ts);
+        });
+      }
+    } else {
+      setPayments([]);
+      setViewingEditTime(undefined);
     }
   }, [viewingInvoice]);
 
@@ -554,29 +657,34 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
   const handleRecordPayment = async () => {
     if (!viewingInvoice || paymentAmount <= 0) return;
     
-    const remaining = viewingInvoice.total - (viewingInvoice.paidAmount || 0);
+    const { netTotal, paid: currentPaid, balance: remaining } = getInvoicePaymentSummary(viewingInvoice, payments);
     if (paymentAmount > remaining) {
       alert("Payment amount cannot exceed remaining balance.");
       return;
     }
 
+    const paymentNowIso = new Date().toISOString();
     const newPayment: Payment = {
       id: db.generateUUID(),
       invoiceId: viewingInvoice.id,
       amount: paymentAmount,
-      date: new Date().toISOString().split('T')[0],
+      date: paymentNowIso,
       note: paymentNote,
       createdBy: userId,
+      createdAt: paymentNowIso,
     };
 
     try {
       await db.savePayment(newPayment);
       
-      const newPaidAmount = (viewingInvoice.paidAmount || 0) + paymentAmount;
+      const newPaidAmount = currentPaid + paymentAmount;
+      const isNowPaid = newPaidAmount >= netTotal;
       const updatedInvoice: Invoice = {
         ...viewingInvoice,
-        paidAmount: newPaidAmount,
-        status: newPaidAmount >= viewingInvoice.total ? 'Paid' : 'Pending'
+        paidAmount: isNowPaid ? netTotal : newPaidAmount,
+        status: isNowPaid ? 'Paid' : 'Pending',
+        paymentMethod: isNowPaid ? 'Cash' : viewingInvoice.paymentMethod,
+        ...(isNowPaid ? { updatedAt: paymentNowIso } : {})
       };
 
       await db.saveInvoices([updatedInvoice]);
@@ -593,12 +701,14 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
 
   const handleMarkAsPaid = async (invoice: Invoice) => {
     if (invoice.status === 'Paid') return;
+    const netTotal = Math.max(0, (invoice.subtotal || 0) - (invoice.discountTotal || 0) + (invoice.taxTotal || 0));
     
     const updatedInvoice: Invoice = {
       ...invoice,
       status: 'Paid',
       paymentMethod: 'Cash',
-      paidAmount: invoice.total
+      paidAmount: netTotal,
+      updatedAt: new Date().toISOString()
     };
 
     try {
@@ -917,15 +1027,23 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
             <tbody className="divide-y divide-gray-100">
               {filteredInvoices.map(inv => {
                 const isDeleting = deletingId === inv.id;
-                const pMethod = inv.paymentMethod || 'Cash';
-                const isReturned = inv.status === 'Returned';
-                const paid = isReturned ? 0 : (pMethod === 'Cash' ? inv.total : (inv.paidAmount || 0));
-                const balance = isReturned ? 0 : ((inv.subtotal - (inv.discountTotal || 0) + (inv.taxTotal || 0)) - paid);
+                const pMethod = inv.status === 'Paid' ? 'Cash' : (inv.paymentMethod || 'Cash');
+                const { paid, balance } = getInvoicePaymentSummary(inv);
                 return (
                   <tr key={inv.id} onClick={() => setViewingInvoice(inv)} className="hover:bg-yellow-50/20 cursor-pointer transition-colors group">
                     <td className="px-6 py-5 font-black text-gray-900">
                       {inv.invoiceNumber}
-                      <p className="text-[8px] text-gray-400 font-bold mt-1">{inv.date}</p>
+                      <p className="text-[8px] text-gray-400 font-bold mt-1">{formatInvoiceDateTime(inv.createdAt, inv.date)}</p>
+                      {inv.status === 'Paid' && inv.updatedAt && (
+                        <p className="text-[8px] text-green-600 font-black mt-0.5">
+                          Paid: {formatInvoiceDateTime(inv.updatedAt)}
+                        </p>
+                      )}
+                      {inv.status === 'Pending' && paid > 0 && (
+                        <p className="text-[8px] text-green-600 font-black mt-0.5">
+                          Partial Payment Paid: Rs. {paid.toLocaleString()}
+                        </p>
+                      )}
                     </td>
                     <td className="px-6 py-5 font-bold text-gray-600">{inv.clientName}</td>
                     <td className="px-6 py-5">
@@ -1406,7 +1524,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   <>
                     <button 
                       onClick={() => {
-                        setPaymentAmount((viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)) - (viewingInvoice.paidAmount || 0));
+                        setPaymentAmount(getInvoicePaymentSummary(viewingInvoice, payments).balance);
                         setIsRecordingPayment(true);
                       }}
                       className="flex items-center gap-2 px-3 sm:px-6 py-2 sm:py-3 bg-blue-600 text-white rounded-lg sm:rounded-xl font-black text-[8px] sm:text-[10px] uppercase hover:bg-blue-700 shadow-lg transition-all"
@@ -1442,7 +1560,46 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                 <div className="text-right">
                   <h1 className="text-6xl font-black text-gray-900 tracking-tighter mb-4 opacity-5 uppercase leading-none">BILL</h1>
                   <p className="text-xl font-black text-black">{viewingInvoice.invoiceNumber}</p>
-                  <p className="text-sm font-bold text-gray-400 tracking-widest uppercase">{viewingInvoice.date}</p>
+                  <p className="text-xs font-bold text-gray-500 tracking-wider uppercase mt-1">
+                    Created: {formatInvoiceDateTime(viewingInvoice.createdAt, viewingInvoice.date)}
+                  </p>
+                  {(() => {
+                    if (viewingInvoice.status === 'Paid') {
+                      const latestPayment = payments.length > 0
+                        ? [...payments].sort((a, b) => new Date(getPaymentTimestamp(b)).getTime() - new Date(getPaymentTimestamp(a)).getTime())[0]
+                        : null;
+                      const resolvedPaidTime = viewingInvoice.updatedAt || viewingEditTime || (latestPayment ? getPaymentTimestamp(latestPayment) : undefined);
+                      if (!resolvedPaidTime) return null;
+                      return (
+                        <p className="text-xs font-black text-green-600 tracking-wider uppercase mt-0.5">
+                          Paid: {formatInvoiceDateTime(resolvedPaidTime)}
+                        </p>
+                      );
+                    }
+
+                    if (viewingInvoice.status === 'Pending') {
+                      const sortedPayments = [...payments].sort(
+                        (a, b) => new Date(getPaymentTimestamp(a)).getTime() - new Date(getPaymentTimestamp(b)).getTime()
+                      );
+                      if (sortedPayments.length > 0) {
+                        return sortedPayments.map((p, idx) => (
+                          <p key={p.id || idx} className="text-xs font-black text-green-600 tracking-wider uppercase mt-0.5">
+                            Partial Payment Paid (Rs. {Number(p.amount).toLocaleString()}): {formatInvoiceDateTime(getPaymentTimestamp(p), p.date)}
+                          </p>
+                        ));
+                      }
+                      const { paid } = getInvoicePaymentSummary(viewingInvoice, payments);
+                      if (paid > 0) {
+                        return (
+                          <p className="text-xs font-black text-green-600 tracking-wider uppercase mt-0.5">
+                            Partial Payment Paid (Rs. {paid.toLocaleString()})
+                          </p>
+                        );
+                      }
+                    }
+
+                    return null;
+                  })()}
                 </div>
               </div>
 
@@ -1470,7 +1627,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                     <div className="flex justify-end items-center">
                        <div className="px-6 py-2 border-2 border-black inline-block bg-white shadow-sm">
                           <span className="text-xl font-black uppercase tracking-tighter text-black">
-                            {viewingInvoice.paymentMethod || 'Cash'}
+                            {viewingInvoice.status === 'Paid' ? 'Cash' : (viewingInvoice.paymentMethod || 'Cash')}
                           </span>
                        </div>
                     </div>
@@ -1536,20 +1693,23 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                       <td className="py-4 text-right font-black text-black uppercase text-[10px] tracking-widest">Total Amount</td>
                       <td className="py-4 text-right font-black text-black text-2xl tracking-tighter">Rs. {(viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)).toLocaleString()}</td>
                     </tr>
-                    {(viewingInvoice.paidAmount && viewingInvoice.paidAmount > 0) || viewingInvoice.paymentMethod === 'Cash' ? (
-                      <>
-                        <tr className="border-t border-gray-100">
-                          <td colSpan={8}></td>
-                          <td className="py-2 text-right font-black text-green-600 uppercase text-[10px] tracking-widest">Amount Paid</td>
-                          <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {Math.min(viewingInvoice.paidAmount || (viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : 0), (viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0))).toLocaleString()}</td>
-                        </tr>
-                        <tr>
-                          <td colSpan={8}></td>
-                          <td className="py-2 text-right font-black text-red-600 uppercase text-[10px] tracking-widest">Remaining Balance</td>
-                          <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {Math.max(0, (viewingInvoice.subtotal - (viewingInvoice.discountTotal || 0) + (viewingInvoice.taxTotal || 0)) - (viewingInvoice.paidAmount || (viewingInvoice.paymentMethod === 'Cash' ? viewingInvoice.total : 0))).toLocaleString()}</td>
-                        </tr>
-                      </>
-                    ) : null}
+                    {viewingInvoice.status !== 'Returned' && (() => {
+                      const { paid, balance } = getInvoicePaymentSummary(viewingInvoice, payments);
+                      return (
+                        <>
+                          <tr className="border-t border-gray-100">
+                            <td colSpan={8}></td>
+                            <td className="py-2 text-right font-black text-green-600 uppercase text-[10px] tracking-widest">Amount Paid</td>
+                            <td className="py-2 text-right font-black text-green-600 text-xl">Rs. {paid.toLocaleString()}</td>
+                          </tr>
+                          <tr>
+                            <td colSpan={8}></td>
+                            <td className="py-2 text-right font-black text-red-600 uppercase text-[10px] tracking-widest">Remaining Balance</td>
+                            <td className="py-2 text-right font-black text-red-600 text-xl">Rs. {balance.toLocaleString()}</td>
+                          </tr>
+                        </>
+                      );
+                    })()}
                   </tfoot>
                 </table>
               </div>
@@ -1568,7 +1728,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                           </div>
                           <div>
                             <p className="text-sm font-black text-gray-900">Rs. {p.amount.toLocaleString()}</p>
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{p.date}</p>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{formatInvoiceDateTime(getPaymentTimestamp(p), p.date)}</p>
                           </div>
                         </div>
                         {p.note && <p className="text-xs font-bold text-gray-500 italic">"{p.note}"</p>}
@@ -1645,7 +1805,7 @@ const Invoices: React.FC<InvoicesProps> = ({ invoices, products, clients, onUpda
                   className="w-full p-4 sm:p-5 bg-gray-50 border border-gray-200 rounded-xl sm:rounded-2xl font-black text-lg sm:text-xl outline-none focus:ring-4 focus:ring-blue-50 transition-all"
                   placeholder="0.00"
                 />
-                <p className="mt-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Remaining: Rs. {(viewingInvoice.total - (viewingInvoice.paidAmount || 0)).toLocaleString()}</p>
+                <p className="mt-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Remaining: Rs. {getInvoicePaymentSummary(viewingInvoice, payments).balance.toLocaleString()}</p>
               </div>
               <div>
                 <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Note (Optional)</label>

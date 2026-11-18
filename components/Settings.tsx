@@ -197,6 +197,7 @@ ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS items JSONB;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS subtotal NUMERIC DEFAULT 0;
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0;
+ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
 
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS user_email TEXT;
 ALTER TABLE public.recurring_invoices ADD COLUMN IF NOT EXISTS sales_person TEXT;

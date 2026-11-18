@@ -185,7 +185,10 @@ const AdminOffice: React.FC<{
 
       const pending = monthlyInvoices.reduce((sum, inv) => {
         const netTotal = (inv.subtotal || 0) - (inv.discountTotal || 0) + (inv.taxTotal || 0);
-        const paid = inv.paymentMethod === 'Cash' ? netTotal : Math.min(inv.paidAmount || 0, netTotal);
+        const rawPaid = Number(inv.paidAmount) || 0;
+        const paid = (inv.paymentMethod || 'Cash') === 'Cash'
+          ? netTotal
+          : (inv.status === 'Pending' && netTotal > 0 && rawPaid >= netTotal ? 0 : Math.min(rawPaid, netTotal));
         return sum + Math.max(0, netTotal - paid);
       }, 0);
       

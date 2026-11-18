@@ -3,5 +3,8 @@
   "description": "Professional business management and invoicing for Overplast Beauty, featuring AI-powered inventory and luxury branding.",
   "requestFramePermissions": [
     "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

@@ -182,10 +182,14 @@ const Clients: React.FC<ClientsProps> = ({ clients, invoices, onUpdate, onCreate
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         {filteredClients && filteredClients.length > 0 ? filteredClients.map(client => {
           const isDeleting = deletingId === client.id;
-          const clientInvoices = invoices.filter(inv => inv.clientId === client.id);
+          const clientInvoices = invoices.filter(inv => inv.clientId === client.id && inv.status !== 'Returned');
           const totalOutstanding = clientInvoices.reduce((sum, inv) => {
-            const paid = inv.paymentMethod === 'Cash' ? inv.total : (inv.paidAmount || 0);
-            return sum + (inv.total - paid);
+            const netTotal = Math.max(0, (inv.subtotal || 0) - (inv.discountTotal || 0) + (inv.taxTotal || 0)) || inv.total;
+            const rawPaid = Number(inv.paidAmount) || 0;
+            const paid = (inv.paymentMethod || 'Cash') === 'Cash'
+              ? netTotal
+              : (inv.status === 'Pending' && netTotal > 0 && rawPaid >= netTotal ? 0 : Math.min(rawPaid, netTotal));
+            return sum + Math.max(0, netTotal - paid);
           }, 0);
 
           return (

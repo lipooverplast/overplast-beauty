@@ -7,10 +7,40 @@ const STORAGE_KEYS = {
   PRODUCTS: 'novainv_products',
   CLIENTS: 'novainv_clients',
   INVOICES: 'novainv_invoices',
+  INVOICE_TIMESTAMPS: 'novainv_invoice_timestamps',
   RECURRING: 'novainv_recurring',
   PROFILES: 'novainv_profiles',
   TRANSACTIONS: 'novainv_transactions',
   PAYMENTS: 'novainv_payments'
+};
+
+let invoicesHasUpdatedAtCol: boolean | null = null;
+
+const getLocalInvoiceTimestamps = (): Record<string, { createdAt?: string; updatedAt?: string }> => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.INVOICE_TIMESTAMPS);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveLocalInvoiceTimestamps = (invoicesToSave: Invoice[]) => {
+  try {
+    const current = getLocalInvoiceTimestamps();
+    invoicesToSave.forEach(inv => {
+      if (inv.id) {
+        const nextUpdatedAt = inv.status === 'Pending' ? undefined : (inv.updatedAt || current[inv.id]?.updatedAt);
+        current[inv.id] = {
+          createdAt: inv.createdAt || current[inv.id]?.createdAt,
+          ...(nextUpdatedAt ? { updatedAt: nextUpdatedAt } : {})
+        };
+      }
+    });
+    localStorage.setItem(STORAGE_KEYS.INVOICE_TIMESTAMPS, JSON.stringify(current));
+  } catch {
+    // Ignore localStorage quota/access errors
+  }
 };
 
 export const isValidUUID = (uuid: string) => {
@@ -440,43 +470,88 @@ export const db = {
   },
 
   getInvoices: async (userId?: string): Promise<Invoice[]> => {
+    const localTimestamps = getLocalInvoiceTimestamps();
     try {
       if (isSupabaseConfigured && supabase) {
         let query = supabase.from('invoices').select('*').order('date', { ascending: false });
         if (userId) query = query.eq('user_id', userId);
         const { data, error } = await withRetry(() => query);
         if (error) throw error;
-        return (data || []).map(inv => ({
-          id: inv.id, invoiceNumber: inv.invoice_number, clientId: inv.client_id,
-          clientName: inv.client_name, date: inv.date, items: inv.items || [],
-          subtotal: Number(inv.subtotal), 
-          discountRate: Number(inv.discount_rate || 0),
-          discountTotal: Number(inv.discount_total || 0),
-          taxRate: Number(inv.tax_rate),
-          taxTotal: Number(inv.tax_total), total: Number(inv.total),
-          expenseType: inv.expense_type || '',
-          expenseAmount: Number(inv.expense_amount || 0),
-          status: inv.status, 
-          paymentMethod: inv.payment_method || 'Cash',
-          paidAmount: Number(inv.paid_amount || 0),
-          salesPerson: inv.sales_person || '',
-          createdBy: inv.user_id,
-          createdByName: inv.user_email,
-          createdAt: inv.created_at
-        }));
+        return (data || []).map(inv => {
+          const ts = localTimestamps[inv.id];
+          return {
+            id: inv.id, invoiceNumber: inv.invoice_number, clientId: inv.client_id,
+            clientName: inv.client_name, date: inv.date, items: inv.items || [],
+            subtotal: Number(inv.subtotal), 
+            discountRate: Number(inv.discount_rate || 0),
+            discountTotal: Number(inv.discount_total || 0),
+            taxRate: Number(inv.tax_rate),
+            taxTotal: Number(inv.tax_total), total: Number(inv.total),
+            expenseType: inv.expense_type || '',
+            expenseAmount: Number(inv.expense_amount || 0),
+            status: inv.status, 
+            paymentMethod: inv.payment_method || 'Cash',
+            paidAmount: Number(inv.paid_amount || 0),
+            salesPerson: inv.sales_person || '',
+            createdBy: inv.user_id,
+            createdByName: inv.user_email,
+            createdAt: inv.created_at || ts?.createdAt,
+            updatedAt: inv.updated_at || ts?.updatedAt
+          };
+        });
       }
     } catch (err: any) {
       const errorMsg = String(err?.message || err || '').toLowerCase();
       if (errorMsg.includes('fetch') || errorMsg.includes('network')) throw err;
     }
     const data = localStorage.getItem(STORAGE_KEYS.INVOICES);
-    const invoices = (data ? JSON.parse(data) : []).map((inv: any) => ({
-      ...inv,
-      items: inv.items || [],
-      paidAmount: inv.paidAmount || 0
-    }));
+    const invoices = (data ? JSON.parse(data) : []).map((inv: any) => {
+      const ts = localTimestamps[inv.id];
+      return {
+        ...inv,
+        items: inv.items || [],
+        paidAmount: inv.paidAmount || 0,
+        createdAt: inv.createdAt || ts?.createdAt,
+        updatedAt: inv.updatedAt || ts?.updatedAt
+      };
+    });
     if (userId) return invoices.filter((inv: any) => inv.createdBy === userId);
     return invoices;
+  },
+
+  getInvoiceEditTimestamp: async (invoiceNumber: string): Promise<string | undefined> => {
+    if (!invoiceNumber) return undefined;
+    const targetNote = `Updated Invoice #${invoiceNumber}`;
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { data, error } = await withRetry(() =>
+          supabase
+            .from('stock_transactions')
+            .select('created_at, date')
+            .eq('note', targetNote)
+            .order('created_at', { ascending: false })
+            .limit(1)
+        );
+        if (!error && data && data.length > 0) {
+          return data[0].created_at || data[0].date;
+        }
+      }
+    } catch {
+      // Fallback to localStorage below
+    }
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+      const txs: any[] = raw ? JSON.parse(raw) : [];
+      const matching = txs
+        .filter(t => t.note === targetNote)
+        .sort((a, b) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
+      if (matching.length > 0) {
+        return matching[0].createdAt || matching[0].date;
+      }
+    } catch {
+      // Ignore
+    }
+    return undefined;
   },
 
   saveInvoices: async (invoicesToSave: Invoice[]) => {
@@ -490,13 +565,15 @@ export const db = {
       };
     });
 
+    saveLocalInvoiceTimestamps(processedInvoices);
+
     if (isSupabaseConfigured && supabase) {
       const session = await getSafeSession();
       const userId = session?.user?.id;
       const userEmail = session?.user?.email;
       if (!userId) throw new Error("Please log in again. Session expired.");
       
-      const dbRows = processedInvoices.map(inv => {
+      const buildRows = (includeUpdatedAt: boolean) => processedInvoices.map(inv => {
         const row: any = {
           id: inv.id,
           user_id: (inv.createdBy && isValidUUID(inv.createdBy)) ? inv.createdBy : userId,
@@ -514,9 +591,26 @@ export const db = {
           paid_amount: inv.paidAmount || 0,
           sales_person: inv.salesPerson || ''
         };
+        if (includeUpdatedAt) {
+          if (inv.status === 'Pending') {
+            row.updated_at = null;
+          } else if (inv.updatedAt) {
+            row.updated_at = inv.updatedAt;
+          }
+        }
         return row;
       });
-      const { error } = await withRetry(() => supabase.from('invoices').upsert(dbRows));
+
+      const shouldIncludeUpdatedAt = invoicesHasUpdatedAtCol !== false && processedInvoices.some(inv => Boolean(inv.updatedAt));
+      let { error } = await withRetry(() => supabase.from('invoices').upsert(buildRows(shouldIncludeUpdatedAt)));
+
+      // If updated_at column does not exist yet in user's Supabase schema, remember that and retry cleanly without failing
+      if (error && shouldIncludeUpdatedAt && (error.code === '42703' || error.code === 'PGRST204' || String(error.message || '').includes('updated_at'))) {
+        invoicesHasUpdatedAtCol = false;
+        const retryRes = await withRetry(() => supabase.from('invoices').upsert(buildRows(false)));
+        error = retryRes.error;
+      }
+
       if (error) {
         if (error.code === '42703' || error.message.includes('column')) {
           throw new Error("Missing schema updates (discount, tax, sales_person, or expense columns) in 'invoices' table. Please run the Repair Script in Settings.");
@@ -900,7 +994,8 @@ export const db = {
           id: p.id, invoiceId: p.invoice_id, amount: Number(p.amount),
           date: p.date, note: p.note,
           createdBy: p.user_id,
-          createdByName: p.user_email
+          createdByName: p.user_email,
+          createdAt: p.created_at
         }));
       }
     } catch (err: any) {
